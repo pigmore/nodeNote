@@ -62,6 +62,34 @@
         background-color: #f5f5f5;
       }
 
+      .control-btn.add-node {
+        background-color: #4caf50;
+        color: white;
+        font-weight: bold;
+      }
+
+      .control-btn.add-node:hover {
+        background-color: #45a049;
+      }
+
+      .control-btn.export {
+        background-color: #2196f3;
+        color: white;
+      }
+
+      .control-btn.export:hover {
+        background-color: #1976d2;
+      }
+
+      .control-btn.import {
+        background-color: #ff9800;
+        color: white;
+      }
+
+      .control-btn.import:hover {
+        background-color: #f57c00;
+      }
+
       .info {
         position: absolute;
         bottom: 20px;
@@ -73,6 +101,109 @@
         color: #666;
         z-index: 1000;
       }
+
+      /* Text input overlay for editing nodes */
+      .text-input-overlay {
+        position: absolute;
+        display: none;
+        z-index: 1001;
+      }
+
+      .text-input-overlay input {
+        border: 2px solid #4caf50;
+        border-radius: 4px;
+        padding: 8px;
+        font-size: 14px;
+        background: white;
+        outline: none;
+        min-width: 150px;
+      }
+
+      /* Import dialog styles */
+      .import-dialog {
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        background-color: rgba(0, 0, 0, 0.5);
+        display: none;
+        justify-content: center;
+        align-items: center;
+        z-index: 2000;
+      }
+
+      .import-dialog-content {
+        background: white;
+        padding: 20px;
+        border-radius: 8px;
+        width: 90%;
+        max-width: 500px;
+        max-height: 80%;
+        display: flex;
+        flex-direction: column;
+        gap: 15px;
+      }
+
+      .import-dialog h3 {
+        margin: 0;
+        color: #333;
+      }
+
+      .import-dialog textarea {
+        width: 100%;
+        height: 200px;
+        border: 2px solid #ddd;
+        border-radius: 4px;
+        padding: 10px;
+        font-family: monospace;
+        font-size: 12px;
+        resize: vertical;
+        outline: none;
+      }
+
+      .import-dialog textarea:focus {
+        border-color: #4caf50;
+      }
+
+      .import-dialog-buttons {
+        display: flex;
+        gap: 10px;
+        justify-content: flex-end;
+      }
+
+      .import-dialog button {
+        padding: 8px 16px;
+        border: none;
+        border-radius: 4px;
+        cursor: pointer;
+        font-size: 14px;
+      }
+
+      .import-dialog .btn-primary {
+        background-color: #4caf50;
+        color: white;
+      }
+
+      .import-dialog .btn-primary:hover {
+        background-color: #45a049;
+      }
+
+      .import-dialog .btn-secondary {
+        background-color: #ddd;
+        color: #333;
+      }
+
+      .import-dialog .btn-secondary:hover {
+        background-color: #ccc;
+      }
+
+      .error-message {
+        color: #f44336;
+        font-size: 12px;
+        margin: 0;
+        display: none;
+      }
     </style>
   </head>
   <body>
@@ -80,6 +211,9 @@
       <canvas id="canvas"></canvas>
 
       <div class="controls">
+        <button class="control-btn add-node" id="addNode" title="Add Node">+</button>
+        <button class="control-btn export" id="exportBtn" title="Export Project">💾</button>
+        <button class="control-btn import" id="importBtn" title="Import Project">📁</button>
         <button class="control-btn" id="zoomIn" title="Zoom In">+</button>
         <button class="control-btn" id="zoomOut" title="Zoom Out">−</button>
         <button class="control-btn" id="reset" title="Reset View">⌂</button>
@@ -88,11 +222,184 @@
       <div class="info">
         <div>Zoom: <span id="zoomLevel">100%</span></div>
         <div>Position: (<span id="posX">0</span>, <span id="posY">0</span>)</div>
+        <div>Nodes: <span id="nodeCount">0</span></div>
         <div>Use mouse wheel to zoom, drag to pan</div>
+        <div>Click nodes to edit text, drag nodes to move</div>
+      </div>
+
+      <!-- Text input overlay for editing node text -->
+      <div class="text-input-overlay" id="textInputOverlay">
+        <input type="text" id="textInput" placeholder="Enter text..." />
+      </div>
+
+      <!-- Import dialog -->
+      <div class="import-dialog" id="importDialog">
+        <div class="import-dialog-content">
+          <h3>Import Project Data</h3>
+          <p>Paste your exported project data below:</p>
+          <textarea id="importTextarea" placeholder="Paste project JSON data here..."></textarea>
+          <p class="error-message" id="importError"></p>
+          <div class="import-dialog-buttons">
+            <button class="btn-secondary" id="importCancel">Cancel</button>
+            <button class="btn-primary" id="importConfirm">Import</button>
+          </div>
+        </div>
       </div>
     </div>
 
     <script>
+      // Node class to represent individual nodes
+      class Node {
+        constructor(x, y, text = 'New Node') {
+          this.id = Math.random().toString(36).substr(2, 9);
+          this.x = x;
+          this.y = y;
+          this.text = text;
+          this.width = 120;
+          this.height = 40;
+          this.minWidth = 80;
+          this.minHeight = 30;
+          this.maxWidth = 300;
+          this.maxHeight = 150;
+          this.isDragging = false;
+          this.dragOffsetX = 0;
+          this.dragOffsetY = 0;
+          this.isSelected = false;
+          this.isResizing = false;
+          this.resizeHandle = null; // 'right', 'bottom', 'corner'
+        }
+
+        // Check if a point is inside this node
+        contains(x, y) {
+          return (
+            x >= this.x - this.width / 2 &&
+            x <= this.x + this.width / 2 &&
+            y >= this.y - this.height / 2 &&
+            y <= this.y + this.height / 2
+          );
+        }
+
+        // Check if a point is on a resize handle
+        getResizeHandle(x, y, scale) {
+          if (!this.isSelected) return null;
+
+          const handleSize = 8 / scale;
+          const nodeLeft = this.x - this.width / 2;
+          const nodeRight = this.x + this.width / 2;
+          const nodeTop = this.y - this.height / 2;
+          const nodeBottom = this.y + this.height / 2;
+
+          // Right edge handle
+          if (Math.abs(x - nodeRight) <= handleSize && y >= nodeTop && y <= nodeBottom) {
+            return 'right';
+          }
+
+          // Bottom edge handle
+          if (Math.abs(y - nodeBottom) <= handleSize && x >= nodeLeft && x <= nodeRight) {
+            return 'bottom';
+          }
+
+          // Corner handle (bottom-right)
+          if (Math.abs(x - nodeRight) <= handleSize && Math.abs(y - nodeBottom) <= handleSize) {
+            return 'corner';
+          }
+
+          return null;
+        }
+
+        // Resize the node
+        resize(newWidth, newHeight) {
+          this.width = Math.max(this.minWidth, Math.min(this.maxWidth, newWidth));
+          this.height = Math.max(this.minHeight, Math.min(this.maxHeight, newHeight));
+        }
+
+        // Draw the node on the canvas
+        draw(ctx, scale) {
+          ctx.save();
+
+          const x = this.x - this.width / 2;
+          const y = this.y - this.height / 2;
+
+          // Draw selection highlight
+          if (this.isSelected) {
+            ctx.fillStyle = 'rgba(74, 175, 79, 0.1)';
+            ctx.strokeStyle = '#4CAF50';
+            ctx.lineWidth = 3 / scale;
+            ctx.beginPath();
+            ctx.roundRect(x - 2 / scale, y - 2 / scale, this.width + 4 / scale, this.height + 4 / scale, 8);
+            ctx.fill();
+            ctx.stroke();
+          }
+
+          // Draw node background
+          ctx.fillStyle = '#ffffff';
+          ctx.strokeStyle = this.isSelected ? '#4CAF50' : '#333333';
+          ctx.lineWidth = 2 / scale;
+
+          // Draw rounded rectangle
+          ctx.beginPath();
+          ctx.roundRect(x, y, this.width, this.height, 8);
+          ctx.fill();
+          ctx.stroke();
+
+          // Draw text
+          ctx.fillStyle = '#333333';
+          ctx.font = `${14 / scale}px Arial`;
+          ctx.textAlign = 'center';
+          ctx.textBaseline = 'middle';
+
+          // Truncate text if too long
+          let displayText = this.text;
+          const maxWidth = this.width - 10;
+          const textWidth = ctx.measureText(displayText).width;
+
+          if (textWidth > maxWidth) {
+            while (ctx.measureText(displayText + '...').width > maxWidth && displayText.length > 0) {
+              displayText = displayText.slice(0, -1);
+            }
+            displayText += '...';
+          }
+
+          ctx.fillText(displayText, this.x, this.y);
+
+          // Draw resize handles if selected
+          if (this.isSelected) {
+            this.drawResizeHandles(ctx, scale);
+          }
+
+          ctx.restore();
+        }
+
+        // Draw resize handles
+        drawResizeHandles(ctx, scale) {
+          const handleSize = 6 / scale;
+          const nodeRight = this.x + this.width / 2;
+          const nodeBottom = this.y + this.height / 2;
+
+          ctx.fillStyle = '#4CAF50';
+          ctx.strokeStyle = '#ffffff';
+          ctx.lineWidth = 1 / scale;
+
+          // Right edge handle
+          ctx.beginPath();
+          ctx.rect(nodeRight - handleSize / 2, this.y - handleSize / 2, handleSize, handleSize);
+          ctx.fill();
+          ctx.stroke();
+
+          // Bottom edge handle
+          ctx.beginPath();
+          ctx.rect(this.x - handleSize / 2, nodeBottom - handleSize / 2, handleSize, handleSize);
+          ctx.fill();
+          ctx.stroke();
+
+          // Corner handle (bottom-right)
+          ctx.beginPath();
+          ctx.rect(nodeRight - handleSize / 2, nodeBottom - handleSize / 2, handleSize, handleSize);
+          ctx.fill();
+          ctx.stroke();
+        }
+      }
+
       class CanvasMap {
         constructor(canvasId) {
           this.canvas = document.getElementById(canvasId);
@@ -111,6 +418,28 @@
           this.lastMouseX = 0;
           this.lastMouseY = 0;
 
+          // Node properties
+          this.nodes = [];
+          this.selectedNode = null;
+          this.isDraggingNode = false;
+          this.isResizingNode = false;
+          this.resizeStartX = 0;
+          this.resizeStartY = 0;
+          this.resizeStartWidth = 0;
+          this.resizeStartHeight = 0;
+
+          // Text editing
+          this.editingNode = null;
+          this.textInputOverlay = document.getElementById('textInputOverlay');
+          this.textInput = document.getElementById('textInput');
+
+          // Import dialog
+          this.importDialog = document.getElementById('importDialog');
+          this.importTextarea = document.getElementById('importTextarea');
+          this.importError = document.getElementById('importError');
+          this.importCancelBtn = document.getElementById('importCancel');
+          this.importConfirmBtn = document.getElementById('importConfirm');
+
           // Initialize
           this.setupCanvas();
           this.setupEventListeners();
@@ -127,16 +456,145 @@
           this.translateY = this.canvas.height / 2;
         }
 
+        // Convert screen coordinates to world coordinates
+        screenToWorld(screenX, screenY) {
+          const worldX = (screenX - this.translateX) / this.scale;
+          const worldY = (screenY - this.translateY) / this.scale;
+          return { x: worldX, y: worldY };
+        }
+
+        // Convert world coordinates to screen coordinates
+        worldToScreen(worldX, worldY) {
+          const screenX = worldX * this.scale + this.translateX;
+          const screenY = worldY * this.scale + this.translateY;
+          return { x: screenX, y: screenY };
+        }
+
+        // Find node at given world coordinates
+        findNodeAt(worldX, worldY) {
+          for (let i = this.nodes.length - 1; i >= 0; i--) {
+            if (this.nodes[i].contains(worldX, worldY)) {
+              return this.nodes[i];
+            }
+          }
+          return null;
+        }
+
+        // Add a new node
+        addNode(worldX = 0, worldY = 0) {
+          const node = new Node(worldX, worldY);
+          this.nodes.push(node);
+          this.updateNodeCount();
+          this.draw();
+          return node;
+        }
+
+        // Start editing a node's text
+        startEditingNode(node) {
+          this.editingNode = node;
+          this.textInput.value = node.text;
+
+          // Position the input overlay
+          const screenPos = this.worldToScreen(node.x, node.y);
+          this.textInputOverlay.style.left = screenPos.x - 75 + 'px';
+          this.textInputOverlay.style.top = screenPos.y - 15 + 'px';
+          this.textInputOverlay.style.display = 'block';
+
+          this.textInput.focus();
+          this.textInput.select();
+        }
+
+        // Finish editing node text
+        finishEditingNode() {
+          if (this.editingNode) {
+            this.editingNode.text = this.textInput.value || 'New Node';
+            this.editingNode = null;
+            this.textInputOverlay.style.display = 'none';
+            this.draw();
+          }
+        }
+
         setupEventListeners() {
-          // Mouse events for panning
+          // Mouse events
           this.canvas.addEventListener('mousedown', e => {
-            this.isDragging = true;
+            const rect = this.canvas.getBoundingClientRect();
+            const screenX = e.clientX - rect.left;
+            const screenY = e.clientY - rect.top;
+            const worldPos = this.screenToWorld(screenX, screenY);
+
+            // Check if clicking on a node
+            const clickedNode = this.findNodeAt(worldPos.x, worldPos.y);
+
+            if (clickedNode) {
+              // Check if clicking on a resize handle
+              const resizeHandle = clickedNode.getResizeHandle(worldPos.x, worldPos.y, this.scale);
+
+              if (resizeHandle && clickedNode.isSelected) {
+                // Start resizing
+                this.isResizingNode = true;
+                this.selectedNode = clickedNode;
+                clickedNode.isResizing = true;
+                clickedNode.resizeHandle = resizeHandle;
+                this.resizeStartX = worldPos.x;
+                this.resizeStartY = worldPos.y;
+                this.resizeStartWidth = clickedNode.width;
+                this.resizeStartHeight = clickedNode.height;
+
+                // Set cursor based on resize handle
+                if (resizeHandle === 'right') {
+                  this.canvas.style.cursor = 'ew-resize';
+                } else if (resizeHandle === 'bottom') {
+                  this.canvas.style.cursor = 'ns-resize';
+                } else if (resizeHandle === 'corner') {
+                  this.canvas.style.cursor = 'nw-resize';
+                }
+              } else {
+                // Select and start dragging node
+                this.selectNode(clickedNode);
+                this.isDraggingNode = true;
+                clickedNode.isDragging = true;
+                clickedNode.dragOffsetX = worldPos.x - clickedNode.x;
+                clickedNode.dragOffsetY = worldPos.y - clickedNode.y;
+              }
+            } else {
+              // Deselect all nodes and start canvas panning
+              this.selectNode(null);
+              this.isDragging = true;
+            }
+
             this.lastMouseX = e.clientX;
             this.lastMouseY = e.clientY;
           });
 
           this.canvas.addEventListener('mousemove', e => {
-            if (this.isDragging) {
+            const rect = this.canvas.getBoundingClientRect();
+            const screenX = e.clientX - rect.left;
+            const screenY = e.clientY - rect.top;
+            const worldPos = this.screenToWorld(screenX, screenY);
+
+            if (this.isResizingNode && this.selectedNode) {
+              // Handle node resizing
+              const node = this.selectedNode;
+              const deltaX = worldPos.x - this.resizeStartX;
+              const deltaY = worldPos.y - this.resizeStartY;
+
+              if (node.resizeHandle === 'right') {
+                node.resize(this.resizeStartWidth + deltaX, node.height);
+              } else if (node.resizeHandle === 'bottom') {
+                node.resize(node.width, this.resizeStartHeight + deltaY);
+              } else if (node.resizeHandle === 'corner') {
+                node.resize(this.resizeStartWidth + deltaX, this.resizeStartHeight + deltaY);
+              }
+
+              this.draw();
+            } else if (this.isDraggingNode && this.selectedNode) {
+              // Drag node
+              this.selectedNode.x = worldPos.x - this.selectedNode.dragOffsetX;
+              this.selectedNode.y = worldPos.y - this.selectedNode.dragOffsetY;
+
+              this.draw();
+            } else if (this.isDragging) {
+              // Pan canvas
               const deltaX = e.clientX - this.lastMouseX;
               const deltaY = e.clientY - this.lastMouseY;
 
@@ -148,15 +606,68 @@
 
               this.draw();
               this.updateInfo();
+            } else {
+              // Update cursor based on hover state
+              const hoveredNode = this.findNodeAt(worldPos.x, worldPos.y);
+
+              if (hoveredNode && hoveredNode.isSelected) {
+                const resizeHandle = hoveredNode.getResizeHandle(worldPos.x, worldPos.y, this.scale);
+
+                if (resizeHandle === 'right') {
+                  this.canvas.style.cursor = 'ew-resize';
+                } else if (resizeHandle === 'bottom') {
+                  this.canvas.style.cursor = 'ns-resize';
+                } else if (resizeHandle === 'corner') {
+                  this.canvas.style.cursor = 'nw-resize';
+                } else {
+                  this.canvas.style.cursor = 'move';
+                }
+              } else if (hoveredNode) {
+                this.canvas.style.cursor = 'pointer';
+              } else {
+                this.canvas.style.cursor = 'grab';
+              }
             }
           });
 
-          this.canvas.addEventListener('mouseup', () => {
-            this.isDragging = false;
+          this.canvas.addEventListener('mouseup', e => {
+            if (this.isResizingNode && this.selectedNode) {
+              this.selectedNode.isResizing = false;
+              this.selectedNode.resizeHandle = null;
+              this.isResizingNode = false;
+            } else if (this.isDraggingNode && this.selectedNode) {
+              this.selectedNode.isDragging = false;
+              this.isDraggingNode = false;
+            } else if (this.isDragging) {
+              this.isDragging = false;
+            }
+
+            // Reset cursor
+            this.canvas.style.cursor = 'grab';
+          });
+
+          // Double click to edit node text
+          this.canvas.addEventListener('dblclick', e => {
+            const rect = this.canvas.getBoundingClientRect();
+            const screenX = e.clientX - rect.left;
+            const screenY = e.clientY - rect.top;
+            const worldPos = this.screenToWorld(screenX, screenY);
+
+            const clickedNode = this.findNodeAt(worldPos.x, worldPos.y);
+            if (clickedNode) {
+              this.startEditingNode(clickedNode);
+            }
           });
 
           this.canvas.addEventListener('mouseleave', () => {
             this.isDragging = false;
+            if (this.selectedNode) {
+              this.selectedNode.isDragging = false;
+              this.selectedNode.isResizing = false;
+              this.isDraggingNode = false;
+              this.isResizingNode = false;
+            }
+            this.canvas.style.cursor = 'grab';
           });
 
           // Mouse wheel for zooming
@@ -188,6 +699,20 @@
           });
 
           // Control buttons
+          document.getElementById('addNode').addEventListener('click', () => {
+            // Add node at center of view
+            const centerWorld = this.screenToWorld(this.canvas.width / 2, this.canvas.height / 2);
+            this.addNode(centerWorld.x, centerWorld.y);
+          });
+
+          document.getElementById('exportBtn').addEventListener('click', () => {
+            this.exportProject();
+          });
+
+          document.getElementById('importBtn').addEventListener('click', () => {
+            this.showImportDialog();
+          });
+
           document.getElementById('zoomIn').addEventListener('click', () => {
             this.zoomAt(this.canvas.width / 2, this.canvas.height / 2, 1.2);
           });
@@ -198,6 +723,58 @@
 
           document.getElementById('reset').addEventListener('click', () => {
             this.reset();
+          });
+
+          // Text input events
+          this.textInput.addEventListener('keydown', e => {
+            if (e.key === 'Enter') {
+              this.finishEditingNode();
+            } else if (e.key === 'Escape') {
+              this.textInputOverlay.style.display = 'none';
+              this.editingNode = null;
+            }
+          });
+
+          this.textInput.addEventListener('blur', () => {
+            this.finishEditingNode();
+          });
+
+          // Import dialog events
+          this.importCancelBtn.addEventListener('click', () => {
+            this.hideImportDialog();
+          });
+
+          this.importConfirmBtn.addEventListener('click', () => {
+            const jsonString = this.importTextarea.value.trim();
+            const errorElement = this.importError;
+
+            if (!jsonString) {
+              errorElement.textContent = 'Please paste project data';
+              errorElement.style.display = 'block';
+              return;
+            }
+
+            const success = this.importProject(jsonString);
+            if (success) {
+              this.hideImportDialog();
+            } else {
+              errorElement.textContent = 'Invalid project data. Please check the format and try again.';
+              errorElement.style.display = 'block';
+            }
+          });
+
+          // Close import dialog when clicking outside
+          this.importDialog.addEventListener('click', e => {
+            if (e.target.id === 'importDialog') {
+              this.hideImportDialog();
+            }
+          });
+
+          // Handle escape key in import dialog
+          document.addEventListener('keydown', e => {
+            if (e.key === 'Escape' && this.importDialog.style.display === 'flex') {
+              this.hideImportDialog();
+            }
           });
 
           // Window resize
@@ -277,6 +854,19 @@
           this.ctx.restore();
         }
 
+        drawNodes() {
+          this.ctx.save();
+          this.ctx.translate(this.translateX, this.translateY);
+          this.ctx.scale(this.scale, this.scale);
+
+          // Draw all nodes
+          for (const node of this.nodes) {
+            node.draw(this.ctx, this.scale);
+          }
+
+          this.ctx.restore();
+        }
+
         draw() {
           // Clear canvas
           this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
@@ -287,13 +877,121 @@
           // Draw origin
           this.drawOrigin();
 
-          // Here you can add more drawing functions for notes, nodes, etc.
+          // Draw nodes
+          this.drawNodes();
         }
 
         updateInfo() {
           document.getElementById('zoomLevel').textContent = Math.round(this.scale * 100) + '%';
           document.getElementById('posX').textContent = Math.round(-this.translateX + this.canvas.width / 2);
           document.getElementById('posY').textContent = Math.round(-this.translateY + this.canvas.height / 2);
+        }
+
+        updateNodeCount() {
+          document.getElementById('nodeCount').textContent = this.nodes.length;
+        }
+
+        // Export project data
+        exportProject() {
+          const projectData = {
+            version: '1.0',
+            timestamp: new Date().toISOString(),
+            canvas: {
+              scale: this.scale,
+              translateX: this.translateX,
+              translateY: this.translateY,
+            },
+            nodes: this.nodes.map(node => ({
+              id: node.id,
+              x: node.x,
+              y: node.y,
+              text: node.text,
+              width: node.width,
+              height: node.height,
+            })),
+          };
+
+          const jsonString = JSON.stringify(projectData, null, 2);
+
+          // Create download link
+          const blob = new Blob([jsonString], { type: 'application/json' });
+          const url = URL.createObjectURL(blob);
+          const a = document.createElement('a');
+          a.href = url;
+          a.download = `nodenote-project-${new Date().toISOString().split('T')[0]}.json`;
+          document.body.appendChild(a);
+          a.click();
+          document.body.removeChild(a);
+          URL.revokeObjectURL(url);
+        }
+
+        // Import project data
+        importProject(jsonString) {
+          try {
+            const projectData = JSON.parse(jsonString);
+
+            // Validate data structure
+            if (!projectData.version || !projectData.nodes || !Array.isArray(projectData.nodes)) {
+              throw new Error('Invalid project data format');
+            }
+
+            // Clear existing nodes
+            this.nodes = [];
+
+            // Restore canvas state if available
+            if (projectData.canvas) {
+              this.scale = projectData.canvas.scale || 1;
+              this.translateX = projectData.canvas.translateX || this.canvas.width / 2;
+              this.translateY = projectData.canvas.translateY || this.canvas.height / 2;
+            }
+
+            // Restore nodes
+            projectData.nodes.forEach(nodeData => {
+              const node = new Node(nodeData.x, nodeData.y, nodeData.text);
+              node.id = nodeData.id || node.id;
+              node.width = nodeData.width || 120;
+              node.height = nodeData.height || 40;
+              this.nodes.push(node);
+            });
+
+            this.updateNodeCount();
+            this.draw();
+            this.updateInfo();
+
+            return true;
+          } catch (error) {
+            console.error('Import error:', error);
+            return false;
+          }
+        }
+
+        // Show import dialog
+        showImportDialog() {
+          this.importDialog.style.display = 'flex';
+          this.importTextarea.value = '';
+          this.importError.style.display = 'none';
+          this.importTextarea.focus();
+        }
+
+        // Hide import dialog
+        hideImportDialog() {
+          this.importDialog.style.display = 'none';
+        }
+
+        // Select a node
+        selectNode(node) {
+          // Deselect all nodes first
+          this.nodes.forEach(n => (n.isSelected = false));
+
+          // Select the clicked node
+          if (node) {
+            node.isSelected = true;
+            this.selectedNode = node;
+          } else {
+            this.selectedNode = null;
+          }
+
+          this.draw();
         }
       }
 
