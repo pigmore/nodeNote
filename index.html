@@ -1,0 +1,307 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Note Taking App - Canvas</title>
+    <style>
+      * {
+        margin: 0;
+        padding: 0;
+        box-sizing: border-box;
+      }
+
+      body {
+        font-family: Arial, sans-serif;
+        background-color: #f0f0f0;
+        overflow: hidden;
+      }
+
+      .container {
+        width: 100vw;
+        height: 100vh;
+        position: relative;
+      }
+
+      #canvas {
+        cursor: grab;
+        background-color: #ffffff;
+        border: 1px solid #ddd;
+      }
+
+      #canvas:active {
+        cursor: grabbing;
+      }
+
+      .controls {
+        position: absolute;
+        top: 20px;
+        right: 20px;
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+        z-index: 1000;
+      }
+
+      .control-btn {
+        width: 40px;
+        height: 40px;
+        background-color: #fff;
+        border: 1px solid #ddd;
+        border-radius: 5px;
+        cursor: pointer;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 18px;
+        box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+        transition: background-color 0.2s;
+      }
+
+      .control-btn:hover {
+        background-color: #f5f5f5;
+      }
+
+      .info {
+        position: absolute;
+        bottom: 20px;
+        left: 20px;
+        background-color: rgba(255, 255, 255, 0.9);
+        padding: 10px;
+        border-radius: 5px;
+        font-size: 12px;
+        color: #666;
+        z-index: 1000;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="container">
+      <canvas id="canvas"></canvas>
+
+      <div class="controls">
+        <button class="control-btn" id="zoomIn" title="Zoom In">+</button>
+        <button class="control-btn" id="zoomOut" title="Zoom Out">−</button>
+        <button class="control-btn" id="reset" title="Reset View">⌂</button>
+      </div>
+
+      <div class="info">
+        <div>Zoom: <span id="zoomLevel">100%</span></div>
+        <div>Position: (<span id="posX">0</span>, <span id="posY">0</span>)</div>
+        <div>Use mouse wheel to zoom, drag to pan</div>
+      </div>
+    </div>
+
+    <script>
+      class CanvasMap {
+        constructor(canvasId) {
+          this.canvas = document.getElementById(canvasId);
+          this.ctx = this.canvas.getContext('2d');
+
+          // Canvas properties
+          this.scale = 1;
+          this.translateX = 0;
+          this.translateY = 0;
+
+          // Grid properties
+          this.gridSize = 20;
+
+          // Mouse properties
+          this.isDragging = false;
+          this.lastMouseX = 0;
+          this.lastMouseY = 0;
+
+          // Initialize
+          this.setupCanvas();
+          this.setupEventListeners();
+          this.draw();
+        }
+
+        setupCanvas() {
+          // Make canvas fill the window
+          this.canvas.width = window.innerWidth;
+          this.canvas.height = window.innerHeight;
+
+          // Set initial position to center
+          this.translateX = this.canvas.width / 2;
+          this.translateY = this.canvas.height / 2;
+        }
+
+        setupEventListeners() {
+          // Mouse events for panning
+          this.canvas.addEventListener('mousedown', e => {
+            this.isDragging = true;
+            this.lastMouseX = e.clientX;
+            this.lastMouseY = e.clientY;
+          });
+
+          this.canvas.addEventListener('mousemove', e => {
+            if (this.isDragging) {
+              const deltaX = e.clientX - this.lastMouseX;
+              const deltaY = e.clientY - this.lastMouseY;
+
+              this.translateX += deltaX;
+              this.translateY += deltaY;
+
+              this.lastMouseX = e.clientX;
+              this.lastMouseY = e.clientY;
+
+              this.draw();
+              this.updateInfo();
+            }
+          });
+
+          this.canvas.addEventListener('mouseup', () => {
+            this.isDragging = false;
+          });
+
+          this.canvas.addEventListener('mouseleave', () => {
+            this.isDragging = false;
+          });
+
+          // Mouse wheel for zooming
+          this.canvas.addEventListener('wheel', e => {
+            e.preventDefault();
+
+            const mouseX = e.clientX;
+            const mouseY = e.clientY;
+
+            // Get mouse position relative to canvas
+            const rect = this.canvas.getBoundingClientRect();
+            const x = mouseX - rect.left;
+            const y = mouseY - rect.top;
+
+            // Calculate zoom
+            const zoom = e.deltaY > 0 ? 0.9 : 1.1;
+            const newScale = this.scale * zoom;
+
+            // Limit zoom range
+            if (newScale < 0.1 || newScale > 5) return;
+
+            // Zoom towards mouse position
+            this.translateX = x - (x - this.translateX) * zoom;
+            this.translateY = y - (y - this.translateY) * zoom;
+            this.scale = newScale;
+
+            this.draw();
+            this.updateInfo();
+          });
+
+          // Control buttons
+          document.getElementById('zoomIn').addEventListener('click', () => {
+            this.zoomAt(this.canvas.width / 2, this.canvas.height / 2, 1.2);
+          });
+
+          document.getElementById('zoomOut').addEventListener('click', () => {
+            this.zoomAt(this.canvas.width / 2, this.canvas.height / 2, 0.8);
+          });
+
+          document.getElementById('reset').addEventListener('click', () => {
+            this.reset();
+          });
+
+          // Window resize
+          window.addEventListener('resize', () => {
+            this.setupCanvas();
+            this.draw();
+          });
+        }
+
+        zoomAt(x, y, zoom) {
+          const newScale = this.scale * zoom;
+          if (newScale < 0.1 || newScale > 5) return;
+
+          this.translateX = x - (x - this.translateX) * zoom;
+          this.translateY = y - (y - this.translateY) * zoom;
+          this.scale = newScale;
+
+          this.draw();
+          this.updateInfo();
+        }
+
+        reset() {
+          this.scale = 1;
+          this.translateX = this.canvas.width / 2;
+          this.translateY = this.canvas.height / 2;
+          this.draw();
+          this.updateInfo();
+        }
+
+        drawGrid() {
+          const scaledGridSize = this.gridSize * this.scale;
+
+          // Skip drawing grid if too small or too large
+          if (scaledGridSize < 5 || scaledGridSize > 200) return;
+
+          this.ctx.strokeStyle = '#e0e0e0';
+          this.ctx.lineWidth = 1;
+
+          // Calculate grid offset
+          const offsetX = this.translateX % scaledGridSize;
+          const offsetY = this.translateY % scaledGridSize;
+
+          // Draw vertical lines
+          for (let x = offsetX; x < this.canvas.width; x += scaledGridSize) {
+            this.ctx.beginPath();
+            this.ctx.moveTo(x, 0);
+            this.ctx.lineTo(x, this.canvas.height);
+            this.ctx.stroke();
+          }
+
+          // Draw horizontal lines
+          for (let y = offsetY; y < this.canvas.height; y += scaledGridSize) {
+            this.ctx.beginPath();
+            this.ctx.moveTo(0, y);
+            this.ctx.lineTo(this.canvas.width, y);
+            this.ctx.stroke();
+          }
+        }
+
+        drawOrigin() {
+          // Draw origin point (0,0) as a small cross
+          this.ctx.save();
+          this.ctx.translate(this.translateX, this.translateY);
+          this.ctx.scale(this.scale, this.scale);
+
+          this.ctx.strokeStyle = '#ff0000';
+          this.ctx.lineWidth = 2 / this.scale;
+
+          // Draw cross
+          this.ctx.beginPath();
+          this.ctx.moveTo(-10 / this.scale, 0);
+          this.ctx.lineTo(10 / this.scale, 0);
+          this.ctx.moveTo(0, -10 / this.scale);
+          this.ctx.lineTo(0, 10 / this.scale);
+          this.ctx.stroke();
+
+          this.ctx.restore();
+        }
+
+        draw() {
+          // Clear canvas
+          this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
+
+          // Draw grid
+          this.drawGrid();
+
+          // Draw origin
+          this.drawOrigin();
+
+          // Here you can add more drawing functions for notes, nodes, etc.
+        }
+
+        updateInfo() {
+          document.getElementById('zoomLevel').textContent = Math.round(this.scale * 100) + '%';
+          document.getElementById('posX').textContent = Math.round(-this.translateX + this.canvas.width / 2);
+          document.getElementById('posY').textContent = Math.round(-this.translateY + this.canvas.height / 2);
+        }
+      }
+
+      // Initialize the canvas map when the page loads
+      window.addEventListener('load', () => {
+        const canvasMap = new CanvasMap('canvas');
+        canvasMap.updateInfo();
+      });
+    </script>
+  </body>
+</html>
