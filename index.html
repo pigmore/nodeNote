@@ -62,14 +62,87 @@
         background-color: #f5f5f5;
       }
 
-      .control-btn.add-node {
-        background-color: #4caf50;
-        color: white;
+      /* Floating Action Buttons - Bottom Right */
+      .fab-container {
+        position: absolute;
+        bottom: 20px;
+        right: 20px;
+        display: flex;
+        flex-direction: column;
+        align-items: end;
+        gap: 15px;
+        z-index: 1000;
+      }
+
+      .fab-btn {
+        background-color: #fff;
+        border: 1px solid #ddd;
+        border-radius: 50%;
+        cursor: pointer;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 18px;
+        box-shadow: 0 4px 8px rgba(0, 0, 0, 0.15);
+        transition: all 0.2s ease;
+      }
+
+      .fab-btn:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 6px 12px rgba(0, 0, 0, 0.2);
+      }
+
+      .fab-btn.fab-primary {
+        width: 60px;
+        height: 60px;
+        font-size: 24px;
         font-weight: bold;
       }
 
-      .control-btn.add-node:hover {
+      .fab-btn.fab-secondary {
+        width: 48px;
+        height: 48px;
+        font-size: 20px;
+      }
+
+      .control-btn.add-node {
+        background-color: #4caf50;
+        color: white;
+      }
+
+      .control-btn.add-node:hover,
+      .fab-btn.add-node:hover {
         background-color: #45a049;
+      }
+
+      .fab-btn.add-node {
+        background-color: #4caf50;
+        color: white;
+      }
+
+      .control-btn.add-link {
+        background-color: #9c27b0;
+        color: white;
+      }
+
+      .control-btn.add-link:hover,
+      .fab-btn.add-link:hover {
+        background-color: #7b1fa2;
+      }
+
+      .fab-btn.add-link {
+        background-color: #9c27b0;
+        color: white;
+      }
+
+      .control-btn.add-link.active,
+      .fab-btn.add-link.active {
+        background-color: #e91e63;
+        box-shadow: 0 0 10px rgba(233, 30, 99, 0.5);
+      }
+
+      .fab-btn.add-link.active:hover {
+        background-color: #c2185b;
       }
 
       .control-btn.export {
@@ -211,7 +284,6 @@
       <canvas id="canvas"></canvas>
 
       <div class="controls">
-        <button class="control-btn add-node" id="addNode" title="Add Node">+</button>
         <button class="control-btn export" id="exportBtn" title="Export Project">💾</button>
         <button class="control-btn import" id="importBtn" title="Import Project">📁</button>
         <button class="control-btn" id="zoomIn" title="Zoom In">+</button>
@@ -219,12 +291,22 @@
         <button class="control-btn" id="reset" title="Reset View">⌂</button>
       </div>
 
+      <!-- Floating Action Buttons -->
+      <div class="fab-container">
+        <button class="fab-btn fab-secondary add-link" id="addLink" title="Add Link">🔗</button>
+        <button class="fab-btn fab-primary add-node" id="addNode" title="Add Node">+</button>
+      </div>
+
       <div class="info">
         <div>Zoom: <span id="zoomLevel">100%</span></div>
         <div>Position: (<span id="posX">0</span>, <span id="posY">0</span>)</div>
         <div>Nodes: <span id="nodeCount">0</span></div>
+        <div>Links: <span id="linkCount">0</span></div>
         <div>Use mouse wheel to zoom, drag to pan</div>
         <div>Click nodes to edit text, drag nodes to move</div>
+        <div id="linkModeInfo" style="display: none; color: #9c27b0; font-weight: bold">
+          Link Mode: Click two nodes to connect them
+        </div>
       </div>
 
       <!-- Text input overlay for editing node text -->
@@ -400,6 +482,173 @@
         }
       }
 
+      // Link class to represent connections between nodes
+      class Link {
+        constructor(startNode, endNode) {
+          this.id = Math.random().toString(36).substr(2, 9);
+          this.startNode = startNode;
+          this.endNode = endNode;
+          this.startNodeId = startNode.id;
+          this.endNodeId = endNode.id;
+
+          // Calculate initial control point position (midpoint with some offset)
+          const midX = (startNode.x + endNode.x) / 2;
+          const midY = (startNode.y + endNode.y) / 2;
+
+          // Add some perpendicular offset for a nice curve
+          const dx = endNode.x - startNode.x;
+          const dy = endNode.y - startNode.y;
+          const length = Math.sqrt(dx * dx + dy * dy);
+
+          if (length > 0) {
+            const normalX = -dy / length;
+            const normalY = dx / length;
+            const offset = Math.min(50, length * 0.3);
+
+            this.controlX = midX + normalX * offset;
+            this.controlY = midY + normalY * offset;
+          } else {
+            this.controlX = midX;
+            this.controlY = midY - 30;
+          }
+
+          this.isSelected = false;
+          this.controlRadius = 6;
+        }
+
+        // Check if a point is near the control point
+        isControlPointHit(x, y, scale) {
+          const radius = this.controlRadius / scale;
+          const dx = x - this.controlX;
+          const dy = y - this.controlY;
+          return dx * dx + dy * dy <= radius * radius;
+        }
+
+        // Check if a point is near the bezier curve
+        isCurveHit(x, y, scale) {
+          const threshold = 8 / scale;
+
+          // Sample points along the bezier curve and check distance
+          for (let t = 0; t <= 1; t += 0.05) {
+            const curvePoint = this.getBezierPoint(t);
+            const dx = x - curvePoint.x;
+            const dy = y - curvePoint.y;
+            if (Math.sqrt(dx * dx + dy * dy) <= threshold) {
+              return true;
+            }
+          }
+          return false;
+        }
+
+        // Get a point on the bezier curve at parameter t (0 to 1)
+        getBezierPoint(t) {
+          const startX = this.startNode.x;
+          const startY = this.startNode.y;
+          const endX = this.endNode.x;
+          const endY = this.endNode.y;
+
+          // Quadratic bezier curve formula
+          const x = (1 - t) * (1 - t) * startX + 2 * (1 - t) * t * this.controlX + t * t * endX;
+          const y = (1 - t) * (1 - t) * startY + 2 * (1 - t) * t * this.controlY + t * t * endY;
+
+          return { x, y };
+        }
+
+        // Draw the link
+        draw(ctx, scale) {
+          ctx.save();
+
+          // Draw bezier curve
+          ctx.strokeStyle = this.isSelected ? '#9C27B0' : '#666666';
+          ctx.lineWidth = this.isSelected ? 3 / scale : 2 / scale;
+          ctx.lineCap = 'round';
+
+          ctx.beginPath();
+          ctx.moveTo(this.startNode.x, this.startNode.y);
+          ctx.quadraticCurveTo(this.controlX, this.controlY, this.endNode.x, this.endNode.y);
+          ctx.stroke();
+
+          // Draw arrowhead at the end
+          this.drawArrowhead(ctx, scale);
+
+          // Draw control point if selected
+          if (this.isSelected) {
+            this.drawControlPoint(ctx, scale);
+            this.drawControlLines(ctx, scale);
+          }
+
+          ctx.restore();
+        }
+
+        // Draw arrowhead at the end of the link
+        drawArrowhead(ctx, scale) {
+          const arrowSize = 8 / scale;
+
+          // Get the direction at the end of the curve
+          const t = 0.95; // Slightly before the end to get good direction
+          const p1 = this.getBezierPoint(t);
+          const p2 = this.getBezierPoint(1);
+
+          const dx = p2.x - p1.x;
+          const dy = p2.y - p1.y;
+          const length = Math.sqrt(dx * dx + dy * dy);
+
+          if (length > 0) {
+            const unitX = dx / length;
+            const unitY = dy / length;
+
+            // Calculate arrowhead points
+            const arrowX1 = p2.x - arrowSize * unitX - arrowSize * 0.5 * unitY;
+            const arrowY1 = p2.y - arrowSize * unitY + arrowSize * 0.5 * unitX;
+            const arrowX2 = p2.x - arrowSize * unitX + arrowSize * 0.5 * unitY;
+            const arrowY2 = p2.y - arrowSize * unitY - arrowSize * 0.5 * unitX;
+
+            ctx.fillStyle = this.isSelected ? '#9C27B0' : '#666666';
+            ctx.beginPath();
+            ctx.moveTo(p2.x, p2.y);
+            ctx.lineTo(arrowX1, arrowY1);
+            ctx.lineTo(arrowX2, arrowY2);
+            ctx.closePath();
+            ctx.fill();
+          }
+        }
+
+        // Draw control point
+        drawControlPoint(ctx, scale) {
+          const radius = this.controlRadius / scale;
+
+          ctx.fillStyle = '#9C27B0';
+          ctx.strokeStyle = '#ffffff';
+          ctx.lineWidth = 2 / scale;
+
+          ctx.beginPath();
+          ctx.arc(this.controlX, this.controlY, radius, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.stroke();
+        }
+
+        // Draw control lines (from start/end to control point)
+        drawControlLines(ctx, scale) {
+          ctx.strokeStyle = 'rgba(156, 39, 176, 0.3)';
+          ctx.lineWidth = 1 / scale;
+          ctx.setLineDash([5 / scale, 5 / scale]);
+
+          // Line from start to control
+          ctx.beginPath();
+          ctx.moveTo(this.startNode.x, this.startNode.y);
+          ctx.lineTo(this.controlX, this.controlY);
+          ctx.stroke();
+
+          // Line from control to end
+          ctx.beginPath();
+          ctx.moveTo(this.controlX, this.controlY);
+          ctx.lineTo(this.endNode.x, this.endNode.y);
+          ctx.stroke();
+
+          ctx.setLineDash([]);
+        }
+      }
+
       class CanvasMap {
         constructor(canvasId) {
           this.canvas = document.getElementById(canvasId);
@@ -427,6 +676,13 @@
           this.resizeStartY = 0;
           this.resizeStartWidth = 0;
           this.resizeStartHeight = 0;
+
+          // Link properties
+          this.links = [];
+          this.selectedLink = null;
+          this.isLinkMode = false;
+          this.linkModeFirstNode = null;
+          this.isDraggingControlPoint = false;
 
           // Text editing
           this.editingNode = null;
@@ -525,6 +781,12 @@
             // Check if clicking on a node
             const clickedNode = this.findNodeAt(worldPos.x, worldPos.y);
 
+            if (this.isLinkMode && clickedNode) {
+              // Handle link creation mode
+              this.handleLinkModeClick(clickedNode);
+              return;
+            }
+
             if (clickedNode) {
               // Check if clicking on a resize handle
               const resizeHandle = clickedNode.getResizeHandle(worldPos.x, worldPos.y, this.scale);
@@ -551,15 +813,33 @@
               } else {
                 // Select and start dragging node
                 this.selectNode(clickedNode);
+                this.selectLink(null); // Deselect any selected link
                 this.isDraggingNode = true;
                 clickedNode.isDragging = true;
                 clickedNode.dragOffsetX = worldPos.x - clickedNode.x;
                 clickedNode.dragOffsetY = worldPos.y - clickedNode.y;
               }
             } else {
-              // Deselect all nodes and start canvas panning
-              this.selectNode(null);
-              this.isDragging = true;
+              // Check if clicking on a link or its control point
+              const clickedLink = this.findLinkAt(worldPos.x, worldPos.y);
+
+              if (clickedLink) {
+                // Check if clicking on control point
+                if (clickedLink.isControlPointHit(worldPos.x, worldPos.y, this.scale)) {
+                  this.selectLink(clickedLink);
+                  this.isDraggingControlPoint = true;
+                  this.canvas.style.cursor = 'move';
+                } else {
+                  // Just select the link
+                  this.selectLink(clickedLink);
+                  this.selectNode(null); // Deselect any selected node
+                }
+              } else {
+                // Deselect all and start canvas panning
+                this.selectNode(null);
+                this.selectLink(null);
+                this.isDragging = true;
+              }
             }
 
             this.lastMouseX = e.clientX;
@@ -572,7 +852,12 @@
             const screenY = e.clientY - rect.top;
             const worldPos = this.screenToWorld(screenX, screenY);
 
-            if (this.isResizingNode && this.selectedNode) {
+            if (this.isDraggingControlPoint && this.selectedLink) {
+              // Drag link control point
+              this.selectedLink.controlX = worldPos.x;
+              this.selectedLink.controlY = worldPos.y;
+              this.draw();
+            } else if (this.isResizingNode && this.selectedNode) {
               // Handle node resizing
               const node = this.selectedNode;
               const deltaX = worldPos.x - this.resizeStartX;
@@ -609,8 +894,11 @@
             } else {
               // Update cursor based on hover state
               const hoveredNode = this.findNodeAt(worldPos.x, worldPos.y);
+              const hoveredLink = this.findLinkAt(worldPos.x, worldPos.y);
 
-              if (hoveredNode && hoveredNode.isSelected) {
+              if (this.isLinkMode) {
+                this.canvas.style.cursor = hoveredNode ? 'pointer' : 'crosshair';
+              } else if (hoveredNode && hoveredNode.isSelected) {
                 const resizeHandle = hoveredNode.getResizeHandle(worldPos.x, worldPos.y, this.scale);
 
                 if (resizeHandle === 'right') {
@@ -624,6 +912,12 @@
                 }
               } else if (hoveredNode) {
                 this.canvas.style.cursor = 'pointer';
+              } else if (hoveredLink) {
+                if (hoveredLink.isControlPointHit(worldPos.x, worldPos.y, this.scale)) {
+                  this.canvas.style.cursor = 'move';
+                } else {
+                  this.canvas.style.cursor = 'pointer';
+                }
               } else {
                 this.canvas.style.cursor = 'grab';
               }
@@ -631,7 +925,9 @@
           });
 
           this.canvas.addEventListener('mouseup', e => {
-            if (this.isResizingNode && this.selectedNode) {
+            if (this.isDraggingControlPoint) {
+              this.isDraggingControlPoint = false;
+            } else if (this.isResizingNode && this.selectedNode) {
               this.selectedNode.isResizing = false;
               this.selectedNode.resizeHandle = null;
               this.isResizingNode = false;
@@ -643,7 +939,7 @@
             }
 
             // Reset cursor
-            this.canvas.style.cursor = 'grab';
+            this.canvas.style.cursor = this.isLinkMode ? 'crosshair' : 'grab';
           });
 
           // Double click to edit node text
@@ -661,6 +957,7 @@
 
           this.canvas.addEventListener('mouseleave', () => {
             this.isDragging = false;
+            this.isDraggingControlPoint = false;
             if (this.selectedNode) {
               this.selectedNode.isDragging = false;
               this.selectedNode.isResizing = false;
@@ -703,6 +1000,10 @@
             // Add node at center of view
             const centerWorld = this.screenToWorld(this.canvas.width / 2, this.canvas.height / 2);
             this.addNode(centerWorld.x, centerWorld.y);
+          });
+
+          document.getElementById('addLink').addEventListener('click', () => {
+            this.toggleLinkMode();
           });
 
           document.getElementById('exportBtn').addEventListener('click', () => {
@@ -867,6 +1168,19 @@
           this.ctx.restore();
         }
 
+        drawLinks() {
+          this.ctx.save();
+          this.ctx.translate(this.translateX, this.translateY);
+          this.ctx.scale(this.scale, this.scale);
+
+          // Draw all links
+          for (const link of this.links) {
+            link.draw(this.ctx, this.scale);
+          }
+
+          this.ctx.restore();
+        }
+
         draw() {
           // Clear canvas
           this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
@@ -876,6 +1190,9 @@
 
           // Draw origin
           this.drawOrigin();
+
+          // Draw links first (behind nodes)
+          this.drawLinks();
 
           // Draw nodes
           this.drawNodes();
@@ -889,6 +1206,10 @@
 
         updateNodeCount() {
           document.getElementById('nodeCount').textContent = this.nodes.length;
+        }
+
+        updateLinkCount() {
+          document.getElementById('linkCount').textContent = this.links.length;
         }
 
         // Export project data
@@ -908,6 +1229,13 @@
               text: node.text,
               width: node.width,
               height: node.height,
+            })),
+            links: this.links.map(link => ({
+              id: link.id,
+              startNodeId: link.startNodeId,
+              endNodeId: link.endNodeId,
+              controlX: link.controlX,
+              controlY: link.controlY,
             })),
           };
 
@@ -935,8 +1263,9 @@
               throw new Error('Invalid project data format');
             }
 
-            // Clear existing nodes
+            // Clear existing data
             this.nodes = [];
+            this.links = [];
 
             // Restore canvas state if available
             if (projectData.canvas) {
@@ -946,15 +1275,34 @@
             }
 
             // Restore nodes
+            const nodeMap = new Map();
             projectData.nodes.forEach(nodeData => {
               const node = new Node(nodeData.x, nodeData.y, nodeData.text);
               node.id = nodeData.id || node.id;
               node.width = nodeData.width || 120;
               node.height = nodeData.height || 40;
               this.nodes.push(node);
+              nodeMap.set(node.id, node);
             });
 
+            // Restore links if available
+            if (projectData.links && Array.isArray(projectData.links)) {
+              projectData.links.forEach(linkData => {
+                const startNode = nodeMap.get(linkData.startNodeId);
+                const endNode = nodeMap.get(linkData.endNodeId);
+
+                if (startNode && endNode) {
+                  const link = new Link(startNode, endNode);
+                  link.id = linkData.id || link.id;
+                  link.controlX = linkData.controlX || link.controlX;
+                  link.controlY = linkData.controlY || link.controlY;
+                  this.links.push(link);
+                }
+              });
+            }
+
             this.updateNodeCount();
+            this.updateLinkCount();
             this.draw();
             this.updateInfo();
 
@@ -992,6 +1340,100 @@
           }
 
           this.draw();
+        }
+
+        // Add a new link between two nodes
+        addLink(startNode, endNode) {
+          // Check if link already exists
+          const existingLink = this.links.find(
+            link =>
+              (link.startNode === startNode && link.endNode === endNode) ||
+              (link.startNode === endNode && link.endNode === startNode)
+          );
+
+          if (existingLink) {
+            return null; // Link already exists
+          }
+
+          const link = new Link(startNode, endNode);
+          this.links.push(link);
+          this.updateLinkCount();
+          this.draw();
+          return link;
+        }
+
+        // Remove a link
+        removeLink(link) {
+          const index = this.links.indexOf(link);
+          if (index !== -1) {
+            this.links.splice(index, 1);
+            this.updateLinkCount();
+            this.draw();
+          }
+        }
+
+        // Find link at given world coordinates
+        findLinkAt(worldX, worldY) {
+          for (let i = this.links.length - 1; i >= 0; i--) {
+            const link = this.links[i];
+            if (link.isCurveHit(worldX, worldY, this.scale)) {
+              return link;
+            }
+          }
+          return null;
+        }
+
+        // Select a link
+        selectLink(link) {
+          // Deselect all links first
+          this.links.forEach(l => (l.isSelected = false));
+
+          // Select the clicked link
+          if (link) {
+            link.isSelected = true;
+            this.selectedLink = link;
+          } else {
+            this.selectedLink = null;
+          }
+
+          this.draw();
+        }
+
+        // Toggle link mode
+        toggleLinkMode() {
+          this.isLinkMode = !this.isLinkMode;
+          this.linkModeFirstNode = null;
+
+          const addLinkBtn = document.getElementById('addLink');
+          const linkModeInfo = document.getElementById('linkModeInfo');
+
+          if (this.isLinkMode) {
+            addLinkBtn.classList.add('active');
+            linkModeInfo.style.display = 'block';
+          } else {
+            addLinkBtn.classList.remove('active');
+            linkModeInfo.style.display = 'none';
+          }
+        }
+
+        // Handle link mode node clicks
+        handleLinkModeClick(node) {
+          if (!this.linkModeFirstNode) {
+            // First node selected
+            this.linkModeFirstNode = node;
+            node.isSelected = true;
+            this.draw();
+          } else {
+            // Second node selected, create link
+            if (this.linkModeFirstNode !== node) {
+              this.addLink(this.linkModeFirstNode, node);
+            }
+
+            // Reset link mode
+            this.linkModeFirstNode.isSelected = false;
+            this.linkModeFirstNode = null;
+            this.toggleLinkMode();
+          }
         }
       }
 
