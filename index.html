@@ -441,6 +441,12 @@
               <button class="property-btn" id="shapeCircle">Circle</button>
             </div>
           </div>
+
+          <div class="property-group" id="radiusGroup" style="display: none">
+            <label class="property-label">Radius</label>
+            <input type="range" class="property-range" id="nodeRadius" min="20" max="100" value="60" />
+            <span id="radiusValue">60px</span>
+          </div>
         </div>
 
         <!-- Link Properties -->
@@ -488,16 +494,16 @@
           // New customization properties
           this.fontSize = 14;
           this.shape = 'rectangle'; // 'rectangle' or 'circle'
+          this.radius = 60; // Default radius for circle shape
         }
 
         // Check if a point is inside this node
         contains(x, y) {
           if (this.shape === 'circle') {
-            // Circle collision detection
-            const radius = Math.min(this.width, this.height) / 2;
+            // Circle collision detection using custom radius
             const dx = x - this.x;
             const dy = y - this.y;
-            return dx * dx + dy * dy <= radius * radius;
+            return dx * dx + dy * dy <= this.radius * this.radius;
           } else {
             // Rectangle collision detection
             return (
@@ -554,7 +560,7 @@
             ctx.lineWidth = 3 / scale;
 
             if (this.shape === 'circle') {
-              const radius = Math.min(this.width, this.height) / 2 + 2 / scale;
+              const radius = this.radius + 2 / scale;
               ctx.beginPath();
               ctx.arc(this.x, this.y, radius, 0, Math.PI * 2);
               ctx.fill();
@@ -575,10 +581,9 @@
           ctx.lineWidth = 2 / scale;
 
           if (this.shape === 'circle') {
-            // Draw circle
-            const radius = Math.min(this.width, this.height) / 2;
+            // Draw circle using custom radius
             ctx.beginPath();
-            ctx.arc(this.x, this.y, radius, 0, Math.PI * 2);
+            ctx.arc(this.x, this.y, this.radius, 0, Math.PI * 2);
             ctx.fill();
             ctx.stroke();
           } else {
@@ -599,7 +604,7 @@
 
           // Truncate text if too long
           let displayText = this.text;
-          const maxWidth = (this.shape === 'circle' ? Math.min(this.width, this.height) * 0.8 : this.width) - 10;
+          const maxWidth = (this.shape === 'circle' ? this.radius * 1.6 : this.width) - 10; // Use radius for circle text width
           const textWidth = ctx.measureText(displayText).width;
 
           if (textWidth > maxWidth) {
@@ -1023,8 +1028,9 @@
                 }
               } else {
                 // Select and start dragging node
+                this.selectLink(null);
                 this.selectNode(clickedNode);
-                this.selectLink(null); // Deselect any selected link
+                // Deselect any selected link
                 this.isDraggingNode = true;
                 clickedNode.isDragging = true;
                 clickedNode.dragOffsetX = worldPos.x - clickedNode.x;
@@ -1042,8 +1048,8 @@
                   this.canvas.style.cursor = 'move';
                 } else {
                   // Just select the link
-                  this.selectLink(clickedLink);
                   this.selectNode(null); // Deselect any selected node
+                  this.selectLink(clickedLink);
                 }
               } else {
                 // Deselect all and start canvas panning
@@ -1293,6 +1299,7 @@
           const nodeFontSizeEl = document.getElementById('nodeFontSize');
           const shapeRectEl = document.getElementById('shapeRect');
           const shapeCircleEl = document.getElementById('shapeCircle');
+          const nodeRadiusEl = document.getElementById('nodeRadius');
           const arrowOnEl = document.getElementById('arrowOn');
           const arrowOffEl = document.getElementById('arrowOff');
           const directionNormalEl = document.getElementById('directionNormal');
@@ -1305,6 +1312,19 @@
                 const fontSizeValue = document.getElementById('fontSizeValue');
                 if (fontSizeValue) {
                   fontSizeValue.textContent = e.target.value + 'px';
+                }
+                this.draw();
+              }
+            });
+          }
+
+          if (nodeRadiusEl) {
+            nodeRadiusEl.addEventListener('input', e => {
+              if (this.selectedNode && this.selectedNode.shape === 'circle') {
+                this.selectedNode.radius = parseInt(e.target.value);
+                const radiusValue = document.getElementById('radiusValue');
+                if (radiusValue) {
+                  radiusValue.textContent = e.target.value + 'px';
                 }
                 this.draw();
               }
@@ -1524,6 +1544,7 @@
               height: node.height,
               fontSize: node.fontSize,
               shape: node.shape,
+              radius: node.radius,
             })),
             links: this.links.map(link => ({
               id: link.id,
@@ -1580,6 +1601,7 @@
               node.height = nodeData.height || 40;
               node.fontSize = nodeData.fontSize || 14;
               node.shape = nodeData.shape || 'rectangle';
+              node.radius = nodeData.radius || 60;
               this.nodes.push(node);
               nodeMap.set(node.id, node);
             });
@@ -1765,6 +1787,9 @@
           const fontSizeValue = document.getElementById('fontSizeValue');
           const shapeRect = document.getElementById('shapeRect');
           const shapeCircle = document.getElementById('shapeCircle');
+          const radiusGroup = document.getElementById('radiusGroup');
+          const radiusInput = document.getElementById('nodeRadius');
+          const radiusValue = document.getElementById('radiusValue');
 
           if (fontSizeInput && fontSizeValue) {
             fontSizeInput.value = node.fontSize;
@@ -1775,6 +1800,17 @@
           if (shapeRect && shapeCircle) {
             shapeRect.classList.toggle('active', node.shape === 'rectangle');
             shapeCircle.classList.toggle('active', node.shape === 'circle');
+          }
+
+          // Show/hide radius control based on shape
+          if (radiusGroup) {
+            radiusGroup.style.display = node.shape === 'circle' ? 'block' : 'none';
+          }
+
+          // Update radius control
+          if (radiusInput && radiusValue && node.shape === 'circle') {
+            radiusInput.value = node.radius;
+            radiusValue.textContent = node.radius + 'px';
           }
         }
 
