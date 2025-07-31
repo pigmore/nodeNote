@@ -277,6 +277,100 @@
         margin: 0;
         display: none;
       }
+
+      /* Properties Panel */
+      .properties-panel {
+        position: absolute;
+        top: 20px;
+        left: 20px;
+        background-color: rgba(255, 255, 255, 0.95);
+        border: 1px solid #ddd;
+        border-radius: 8px;
+        padding: 15px;
+        min-width: 200px;
+        max-width: 250px;
+        font-size: 12px;
+        color: #333;
+        z-index: 1001;
+        display: none;
+        box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+        backdrop-filter: blur(5px);
+      }
+
+      .properties-panel.debug {
+        background-color: rgba(255, 0, 0, 0.9) !important;
+        border: 2px solid #ff0000 !important;
+        display: block !important;
+        z-index: 9999 !important;
+      }
+
+      .properties-panel h3 {
+        margin: 0 0 10px 0;
+        font-size: 14px;
+        color: #333;
+        border-bottom: 1px solid #eee;
+        padding-bottom: 5px;
+      }
+
+      .property-group {
+        margin-bottom: 12px;
+      }
+
+      .property-label {
+        display: block;
+        margin-bottom: 4px;
+        font-weight: 500;
+        color: #555;
+      }
+
+      .property-control {
+        width: 100%;
+        padding: 4px 8px;
+        border: 1px solid #ddd;
+        border-radius: 4px;
+        font-size: 12px;
+        outline: none;
+      }
+
+      .property-control:focus {
+        border-color: #4caf50;
+      }
+
+      .property-buttons {
+        display: flex;
+        gap: 5px;
+      }
+
+      .property-btn {
+        flex: 1;
+        padding: 6px 8px;
+        border: 1px solid #ddd;
+        border-radius: 4px;
+        background: white;
+        cursor: pointer;
+        font-size: 11px;
+        transition: all 0.2s;
+      }
+
+      .property-btn:hover {
+        background: #f5f5f5;
+      }
+
+      .property-btn.active {
+        background: #4caf50;
+        color: white;
+        border-color: #4caf50;
+      }
+
+      .property-btn.link-btn.active {
+        background: #9c27b0;
+        border-color: #9c27b0;
+      }
+
+      .property-range {
+        width: 100%;
+        margin: 5px 0;
+      }
     </style>
   </head>
   <body>
@@ -327,6 +421,47 @@
           </div>
         </div>
       </div>
+
+      <!-- Properties Panel -->
+      <div class="properties-panel" id="propertiesPanel">
+        <h3 id="propertiesTitle">Properties</h3>
+
+        <!-- Node Properties -->
+        <div id="nodeProperties" style="display: none">
+          <div class="property-group">
+            <label class="property-label">Font Size</label>
+            <input type="range" class="property-range" id="nodeFontSize" min="8" max="24" value="14" />
+            <span id="fontSizeValue">14px</span>
+          </div>
+
+          <div class="property-group">
+            <label class="property-label">Shape</label>
+            <div class="property-buttons">
+              <button class="property-btn active" id="shapeRect">Rectangle</button>
+              <button class="property-btn" id="shapeCircle">Circle</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Link Properties -->
+        <div id="linkProperties" style="display: none">
+          <div class="property-group">
+            <label class="property-label">Arrow</label>
+            <div class="property-buttons">
+              <button class="property-btn link-btn active" id="arrowOn">Show</button>
+              <button class="property-btn link-btn" id="arrowOff">Hide</button>
+            </div>
+          </div>
+
+          <div class="property-group">
+            <label class="property-label">Direction</label>
+            <div class="property-buttons">
+              <button class="property-btn link-btn active" id="directionNormal">A → B</button>
+              <button class="property-btn link-btn" id="directionReverse">A ← B</button>
+            </div>
+          </div>
+        </div>
+      </div>
     </div>
 
     <script>
@@ -349,21 +484,34 @@
           this.isSelected = false;
           this.isResizing = false;
           this.resizeHandle = null; // 'right', 'bottom', 'corner'
+
+          // New customization properties
+          this.fontSize = 14;
+          this.shape = 'rectangle'; // 'rectangle' or 'circle'
         }
 
         // Check if a point is inside this node
         contains(x, y) {
-          return (
-            x >= this.x - this.width / 2 &&
-            x <= this.x + this.width / 2 &&
-            y >= this.y - this.height / 2 &&
-            y <= this.y + this.height / 2
-          );
+          if (this.shape === 'circle') {
+            // Circle collision detection
+            const radius = Math.min(this.width, this.height) / 2;
+            const dx = x - this.x;
+            const dy = y - this.y;
+            return dx * dx + dy * dy <= radius * radius;
+          } else {
+            // Rectangle collision detection
+            return (
+              x >= this.x - this.width / 2 &&
+              x <= this.x + this.width / 2 &&
+              y >= this.y - this.height / 2 &&
+              y <= this.y + this.height / 2
+            );
+          }
         }
 
         // Check if a point is on a resize handle
         getResizeHandle(x, y, scale) {
-          if (!this.isSelected) return null;
+          if (!this.isSelected || this.shape === 'circle') return null;
 
           const handleSize = 8 / scale;
           const nodeLeft = this.x - this.width / 2;
@@ -399,18 +547,26 @@
         draw(ctx, scale) {
           ctx.save();
 
-          const x = this.x - this.width / 2;
-          const y = this.y - this.height / 2;
-
           // Draw selection highlight
           if (this.isSelected) {
             ctx.fillStyle = 'rgba(74, 175, 79, 0.1)';
             ctx.strokeStyle = '#4CAF50';
             ctx.lineWidth = 3 / scale;
-            ctx.beginPath();
-            ctx.roundRect(x - 2 / scale, y - 2 / scale, this.width + 4 / scale, this.height + 4 / scale, 8);
-            ctx.fill();
-            ctx.stroke();
+
+            if (this.shape === 'circle') {
+              const radius = Math.min(this.width, this.height) / 2 + 2 / scale;
+              ctx.beginPath();
+              ctx.arc(this.x, this.y, radius, 0, Math.PI * 2);
+              ctx.fill();
+              ctx.stroke();
+            } else {
+              const x = this.x - this.width / 2 - 2 / scale;
+              const y = this.y - this.height / 2 - 2 / scale;
+              ctx.beginPath();
+              ctx.roundRect(x, y, this.width + 4 / scale, this.height + 4 / scale, 8);
+              ctx.fill();
+              ctx.stroke();
+            }
           }
 
           // Draw node background
@@ -418,21 +574,32 @@
           ctx.strokeStyle = this.isSelected ? '#4CAF50' : '#333333';
           ctx.lineWidth = 2 / scale;
 
-          // Draw rounded rectangle
-          ctx.beginPath();
-          ctx.roundRect(x, y, this.width, this.height, 8);
-          ctx.fill();
-          ctx.stroke();
+          if (this.shape === 'circle') {
+            // Draw circle
+            const radius = Math.min(this.width, this.height) / 2;
+            ctx.beginPath();
+            ctx.arc(this.x, this.y, radius, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.stroke();
+          } else {
+            // Draw rounded rectangle
+            const x = this.x - this.width / 2;
+            const y = this.y - this.height / 2;
+            ctx.beginPath();
+            ctx.roundRect(x, y, this.width, this.height, 8);
+            ctx.fill();
+            ctx.stroke();
+          }
 
           // Draw text
           ctx.fillStyle = '#333333';
-          ctx.font = `${14 / scale}px Arial`;
+          ctx.font = `${this.fontSize / scale}px Arial`;
           ctx.textAlign = 'center';
           ctx.textBaseline = 'middle';
 
           // Truncate text if too long
           let displayText = this.text;
-          const maxWidth = this.width - 10;
+          const maxWidth = (this.shape === 'circle' ? Math.min(this.width, this.height) * 0.8 : this.width) - 10;
           const textWidth = ctx.measureText(displayText).width;
 
           if (textWidth > maxWidth) {
@@ -444,8 +611,8 @@
 
           ctx.fillText(displayText, this.x, this.y);
 
-          // Draw resize handles if selected
-          if (this.isSelected) {
+          // Draw resize handles if selected and rectangle
+          if (this.isSelected && this.shape === 'rectangle') {
             this.drawResizeHandles(ctx, scale);
           }
 
@@ -514,6 +681,10 @@
 
           this.isSelected = false;
           this.controlRadius = 6;
+
+          // New customization properties
+          this.hasArrow = true;
+          this.isReversed = false;
         }
 
         // Check if a point is near the control point
@@ -554,9 +725,19 @@
           return { x, y };
         }
 
+        // Get effective start and end nodes (considering reverse)
+        getEffectiveNodes() {
+          if (this.isReversed) {
+            return { start: this.endNode, end: this.startNode };
+          }
+          return { start: this.startNode, end: this.endNode };
+        }
+
         // Draw the link
         draw(ctx, scale) {
           ctx.save();
+
+          const { start, end } = this.getEffectiveNodes();
 
           // Draw bezier curve
           ctx.strokeStyle = this.isSelected ? '#9C27B0' : '#666666';
@@ -564,8 +745,8 @@
           ctx.lineCap = 'round';
 
           ctx.beginPath();
-          ctx.moveTo(this.startNode.x, this.startNode.y);
-          ctx.quadraticCurveTo(this.controlX, this.controlY, this.endNode.x, this.endNode.y);
+          ctx.moveTo(start.x, start.y);
+          ctx.quadraticCurveTo(this.controlX, this.controlY, end.x, end.y);
           ctx.stroke();
 
           // Draw arrowhead at the end
@@ -582,12 +763,15 @@
 
         // Draw arrowhead at the end of the link
         drawArrowhead(ctx, scale) {
+          if (!this.hasArrow) return;
+
           const arrowSize = 8 / scale;
+          const { start, end } = this.getEffectiveNodes();
 
           // Get the direction at the end of the curve
           const t = 0.95; // Slightly before the end to get good direction
-          const p1 = this.getBezierPoint(t);
-          const p2 = this.getBezierPoint(1);
+          const p1 = this.getBezierPoint(t, start, end);
+          const p2 = this.getBezierPoint(1, start, end);
 
           const dx = p2.x - p1.x;
           const dy = p2.y - p1.y;
@@ -696,10 +880,37 @@
           this.importCancelBtn = document.getElementById('importCancel');
           this.importConfirmBtn = document.getElementById('importConfirm');
 
+          // Initialize properties panel elements - with error checking
+          this.initializePropertiesPanel();
+
           // Initialize
           this.setupCanvas();
           this.setupEventListeners();
           this.draw();
+        }
+
+        // Initialize properties panel elements with error checking
+        initializePropertiesPanel() {
+          console.log('Initializing properties panel...');
+
+          this.propertiesPanel = document.getElementById('propertiesPanel');
+          this.propertiesTitle = document.getElementById('propertiesTitle');
+          this.nodeProperties = document.getElementById('nodeProperties');
+          this.linkProperties = document.getElementById('linkProperties');
+
+          console.log('Properties panel elements found:', {
+            propertiesPanel: !!this.propertiesPanel,
+            propertiesTitle: !!this.propertiesTitle,
+            nodeProperties: !!this.nodeProperties,
+            linkProperties: !!this.linkProperties,
+          });
+
+          if (!this.propertiesPanel) {
+            console.error('Properties panel not found! Element with ID "propertiesPanel" does not exist.');
+            return false;
+          }
+
+          return true;
         }
 
         setupCanvas() {
@@ -1078,6 +1289,88 @@
             }
           });
 
+          // Properties panel events - with error checking
+          const nodeFontSizeEl = document.getElementById('nodeFontSize');
+          const shapeRectEl = document.getElementById('shapeRect');
+          const shapeCircleEl = document.getElementById('shapeCircle');
+          const arrowOnEl = document.getElementById('arrowOn');
+          const arrowOffEl = document.getElementById('arrowOff');
+          const directionNormalEl = document.getElementById('directionNormal');
+          const directionReverseEl = document.getElementById('directionReverse');
+
+          if (nodeFontSizeEl) {
+            nodeFontSizeEl.addEventListener('input', e => {
+              if (this.selectedNode) {
+                this.selectedNode.fontSize = parseInt(e.target.value);
+                const fontSizeValue = document.getElementById('fontSizeValue');
+                if (fontSizeValue) {
+                  fontSizeValue.textContent = e.target.value + 'px';
+                }
+                this.draw();
+              }
+            });
+          }
+
+          if (shapeRectEl) {
+            shapeRectEl.addEventListener('click', () => {
+              if (this.selectedNode) {
+                this.selectedNode.shape = 'rectangle';
+                this.showNodeProperties(this.selectedNode);
+                this.draw();
+              }
+            });
+          }
+
+          if (shapeCircleEl) {
+            shapeCircleEl.addEventListener('click', () => {
+              if (this.selectedNode) {
+                this.selectedNode.shape = 'circle';
+                this.showNodeProperties(this.selectedNode);
+                this.draw();
+              }
+            });
+          }
+
+          if (arrowOnEl) {
+            arrowOnEl.addEventListener('click', () => {
+              if (this.selectedLink) {
+                this.selectedLink.hasArrow = true;
+                this.showLinkProperties(this.selectedLink);
+                this.draw();
+              }
+            });
+          }
+
+          if (arrowOffEl) {
+            arrowOffEl.addEventListener('click', () => {
+              if (this.selectedLink) {
+                this.selectedLink.hasArrow = false;
+                this.showLinkProperties(this.selectedLink);
+                this.draw();
+              }
+            });
+          }
+
+          if (directionNormalEl) {
+            directionNormalEl.addEventListener('click', () => {
+              if (this.selectedLink) {
+                this.selectedLink.isReversed = false;
+                this.showLinkProperties(this.selectedLink);
+                this.draw();
+              }
+            });
+          }
+
+          if (directionReverseEl) {
+            directionReverseEl.addEventListener('click', () => {
+              if (this.selectedLink) {
+                this.selectedLink.isReversed = true;
+                this.showLinkProperties(this.selectedLink);
+                this.draw();
+              }
+            });
+          }
+
           // Window resize
           window.addEventListener('resize', () => {
             this.setupCanvas();
@@ -1215,7 +1508,7 @@
         // Export project data
         exportProject() {
           const projectData = {
-            version: '1.0',
+            version: '1.1',
             timestamp: new Date().toISOString(),
             canvas: {
               scale: this.scale,
@@ -1229,6 +1522,8 @@
               text: node.text,
               width: node.width,
               height: node.height,
+              fontSize: node.fontSize,
+              shape: node.shape,
             })),
             links: this.links.map(link => ({
               id: link.id,
@@ -1236,6 +1531,8 @@
               endNodeId: link.endNodeId,
               controlX: link.controlX,
               controlY: link.controlY,
+              hasArrow: link.hasArrow,
+              isReversed: link.isReversed,
             })),
           };
 
@@ -1281,6 +1578,8 @@
               node.id = nodeData.id || node.id;
               node.width = nodeData.width || 120;
               node.height = nodeData.height || 40;
+              node.fontSize = nodeData.fontSize || 14;
+              node.shape = nodeData.shape || 'rectangle';
               this.nodes.push(node);
               nodeMap.set(node.id, node);
             });
@@ -1296,6 +1595,8 @@
                   link.id = linkData.id || link.id;
                   link.controlX = linkData.controlX || link.controlX;
                   link.controlY = linkData.controlY || link.controlY;
+                  link.hasArrow = linkData.hasArrow !== undefined ? linkData.hasArrow : true;
+                  link.isReversed = linkData.isReversed || false;
                   this.links.push(link);
                 }
               });
@@ -1303,6 +1604,7 @@
 
             this.updateNodeCount();
             this.updateLinkCount();
+            this.hideProperties();
             this.draw();
             this.updateInfo();
 
@@ -1335,8 +1637,10 @@
           if (node) {
             node.isSelected = true;
             this.selectedNode = node;
+            this.showNodeProperties(node);
           } else {
             this.selectedNode = null;
+            this.hideProperties();
           }
 
           this.draw();
@@ -1392,8 +1696,10 @@
           if (link) {
             link.isSelected = true;
             this.selectedLink = link;
+            this.showLinkProperties(link);
           } else {
             this.selectedLink = null;
+            this.hideProperties();
           }
 
           this.draw();
@@ -1435,12 +1741,113 @@
             this.toggleLinkMode();
           }
         }
+
+        // Show node properties panel
+        showNodeProperties(node) {
+          console.log('showNodeProperties called', node);
+          console.log('propertiesPanel element:', this.propertiesPanel);
+
+          if (!this.propertiesPanel) {
+            console.error('Properties panel element not found!');
+            // Try to reinitialize
+            if (!this.initializePropertiesPanel()) {
+              return;
+            }
+          }
+
+          this.propertiesPanel.style.display = 'block';
+          this.propertiesTitle.textContent = 'Node Properties';
+          this.nodeProperties.style.display = 'block';
+          this.linkProperties.style.display = 'none';
+
+          // Update controls with current values
+          const fontSizeInput = document.getElementById('nodeFontSize');
+          const fontSizeValue = document.getElementById('fontSizeValue');
+          const shapeRect = document.getElementById('shapeRect');
+          const shapeCircle = document.getElementById('shapeCircle');
+
+          if (fontSizeInput && fontSizeValue) {
+            fontSizeInput.value = node.fontSize;
+            fontSizeValue.textContent = node.fontSize + 'px';
+          }
+
+          // Update shape buttons
+          if (shapeRect && shapeCircle) {
+            shapeRect.classList.toggle('active', node.shape === 'rectangle');
+            shapeCircle.classList.toggle('active', node.shape === 'circle');
+          }
+        }
+
+        // Show link properties panel
+        showLinkProperties(link) {
+          console.log('showLinkProperties called', link);
+          console.log('propertiesPanel element:', this.propertiesPanel);
+
+          if (!this.propertiesPanel) {
+            console.error('Properties panel element not found!');
+            // Try to reinitialize
+            if (!this.initializePropertiesPanel()) {
+              return;
+            }
+          }
+
+          this.propertiesPanel.style.display = 'block';
+          this.propertiesTitle.textContent = 'Link Properties';
+          this.nodeProperties.style.display = 'none';
+          this.linkProperties.style.display = 'block';
+
+          // Update controls with current values
+          const arrowOn = document.getElementById('arrowOn');
+          const arrowOff = document.getElementById('arrowOff');
+          const directionNormal = document.getElementById('directionNormal');
+          const directionReverse = document.getElementById('directionReverse');
+
+          if (arrowOn && arrowOff) {
+            arrowOn.classList.toggle('active', link.hasArrow);
+            arrowOff.classList.toggle('active', !link.hasArrow);
+          }
+
+          if (directionNormal && directionReverse) {
+            directionNormal.classList.toggle('active', !link.isReversed);
+            directionReverse.classList.toggle('active', link.isReversed);
+          }
+        }
+
+        // Hide properties panel
+        hideProperties() {
+          // Debug: Log the call stack to see where this is being called from
+          console.log('hideProperties() called');
+          console.trace('hideProperties call stack:');
+
+          if (this.propertiesPanel) {
+            this.propertiesPanel.style.display = 'none';
+          }
+        }
       }
 
       // Initialize the canvas map when the page loads
       window.addEventListener('load', () => {
         const canvasMap = new CanvasMap('canvas');
         canvasMap.updateInfo();
+
+        // Add debug function to test properties panel
+        window.testPropertiesPanel = () => {
+          console.log('Testing properties panel...');
+          const panel = document.getElementById('propertiesPanel');
+          console.log('Panel element:', panel);
+          if (panel) {
+            panel.style.display = 'block';
+            panel.style.background = 'red'; // Temporary red background for visibility
+            console.log('Panel should now be visible with red background');
+          } else {
+            console.error('Panel element not found!');
+          }
+        };
+
+        // Make canvasMap globally accessible for debugging
+        window.canvasMap = canvasMap;
+
+        console.log('Page loaded. You can test the properties panel by running: testPropertiesPanel()');
       });
     </script>
   </body>
