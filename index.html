@@ -399,6 +399,7 @@
         <div>Use mouse wheel to zoom, drag to pan</div>
         <div>Click nodes to edit text, drag nodes to move</div>
         <div>Press Delete/Backspace to delete selected items</div>
+        <div>Drag link control points or use curve controls to adjust links</div>
         <div id="linkModeInfo" style="display: none; color: #9c27b0; font-weight: bold">
           Link Mode: Click two nodes to connect them
         </div>
@@ -471,8 +472,23 @@
           <div class="property-group">
             <label class="property-label">Direction</label>
             <div class="property-buttons">
-              <button class="property-btn link-btn active" id="directionNormal">A → B</button>
-              <button class="property-btn link-btn" id="directionReverse">A ← B</button>
+              <button class="property-btn link-btn active" id="directionNormal">Normal</button>
+              <button class="property-btn link-btn" id="directionReverse">Reverse</button>
+            </div>
+          </div>
+
+          <div class="property-group">
+            <label class="property-label">Curve Strength</label>
+            <input type="range" class="property-range" id="curveStrength" min="0" max="100" value="30" />
+            <span id="curveStrengthValue">30%</span>
+          </div>
+
+          <div class="property-group">
+            <label class="property-label">Curve Style</label>
+            <div class="property-buttons">
+              <button class="property-btn link-btn" id="curveStraight">Straight</button>
+              <button class="property-btn link-btn active" id="curveGentle">Gentle</button>
+              <button class="property-btn link-btn" id="curveStrong">Strong</button>
             </div>
           </div>
         </div>
@@ -683,33 +699,18 @@
           this.startNodeId = startNode.id;
           this.endNodeId = endNode.id;
 
-          // Calculate initial control point position (midpoint with some offset)
-          const midX = (startNode.x + endNode.x) / 2;
-          const midY = (startNode.y + endNode.y) / 2;
-
-          // Add some perpendicular offset for a nice curve
-          const dx = endNode.x - startNode.x;
-          const dy = endNode.y - startNode.y;
-          const length = Math.sqrt(dx * dx + dy * dy);
-
-          if (length > 0) {
-            const normalX = -dy / length;
-            const normalY = dx / length;
-            const offset = Math.min(50, length * 0.3);
-
-            this.controlX = midX + normalX * offset;
-            this.controlY = midY + normalY * offset;
-          } else {
-            this.controlX = midX;
-            this.controlY = midY - 30;
-          }
-
           this.isSelected = false;
           this.controlRadius = 6;
 
           // New customization properties
           this.hasArrow = true;
           this.isReversed = false;
+          this.curveStrength = 30; // 0-100, percentage of curve intensity
+          this.curveStyle = 'gentle'; // 'straight', 'gentle', 'strong'
+          this.manualControlPoint = false; // Track if user manually positioned control point
+
+          // Calculate initial control point using new system
+          this.calculateControlPoint();
         }
 
         // Check if a point is near the control point
@@ -737,11 +738,14 @@
         }
 
         // Get a point on the bezier curve at parameter t (0 to 1)
-        getBezierPoint(t) {
-          const startX = this.startNode.x;
-          const startY = this.startNode.y;
-          const endX = this.endNode.x;
-          const endY = this.endNode.y;
+        getBezierPoint(t, startNode = null, endNode = null) {
+          // Use provided nodes or get effective nodes based on direction
+          const { start, end } = startNode && endNode ? { start: startNode, end: endNode } : this.getEffectiveNodes();
+
+          const startX = start.x;
+          const startY = start.y;
+          const endX = end.x;
+          const endY = end.y;
 
           // Quadratic bezier curve formula
           const x = (1 - t) * (1 - t) * startX + 2 * (1 - t) * t * this.controlX + t * t * endX;
@@ -793,12 +797,23 @@
           const arrowSize = 8 / scale;
           const { start, end } = this.getEffectiveNodes();
 
+          // Debug logging for selected links
+          if (this.isSelected && window.debugArrows) {
+            console.log('Drawing arrow for link:', {
+              originalStart: this.startNode.text,
+              originalEnd: this.endNode.text,
+              effectiveStart: start.text,
+              effectiveEnd: end.text,
+              isReversed: this.isReversed,
+            });
+          }
+
           // Get the direction at the middle of the curve (t = 0.5)
           const t1 = 0.45; // Slightly before middle to get good direction
           const t2 = 0.55; // Slightly after middle
-          const p1 = this.getBezierPoint(t1, start, end);
-          const p2 = this.getBezierPoint(t2, start, end);
-          const pMiddle = this.getBezierPoint(0.5, start, end); // Exact middle position
+          const p1 = this.getBezierPoint(t1);
+          const p2 = this.getBezierPoint(t2);
+          const pMiddle = this.getBezierPoint(0.5); // Exact middle position
 
           const dx = p2.x - p1.x;
           const dy = p2.y - p1.y;
@@ -840,23 +855,82 @@
 
         // Draw control lines (from start/end to control point)
         drawControlLines(ctx, scale) {
+          const { start, end } = this.getEffectiveNodes();
+
           ctx.strokeStyle = 'rgba(156, 39, 176, 0.3)';
           ctx.lineWidth = 1 / scale;
           ctx.setLineDash([5 / scale, 5 / scale]);
 
           // Line from start to control
           ctx.beginPath();
-          ctx.moveTo(this.startNode.x, this.startNode.y);
+          ctx.moveTo(start.x, start.y);
           ctx.lineTo(this.controlX, this.controlY);
           ctx.stroke();
 
           // Line from control to end
           ctx.beginPath();
           ctx.moveTo(this.controlX, this.controlY);
-          ctx.lineTo(this.endNode.x, this.endNode.y);
+          ctx.lineTo(end.x, end.y);
           ctx.stroke();
 
           ctx.setLineDash([]);
+        }
+
+        // Calculate control point based on curve settings
+        calculateControlPoint() {
+          const { start, end } = this.getEffectiveNodes();
+
+          const startX = start.x;
+          const startY = start.y;
+          const endX = end.x;
+          const endY = end.y;
+
+          const midX = (startX + endX) / 2;
+          const midY = (startY + endY) / 2;
+
+          // Calculate base offset
+          const dx = endX - startX;
+          const dy = endY - startY;
+          const length = Math.sqrt(dx * dx + dy * dy);
+
+          if (length === 0) {
+            this.controlX = midX;
+            this.controlY = midY - 30;
+            return;
+          }
+
+          // Calculate perpendicular direction
+          const normalX = -dy / length;
+          const normalY = dx / length;
+
+          // Apply curve strength and style
+          let baseOffset = 50;
+          let strengthMultiplier = this.curveStrength / 100;
+
+          switch (this.curveStyle) {
+            case 'straight':
+              baseOffset = 0;
+              break;
+            case 'gentle':
+              baseOffset = Math.min(50, length * 0.2);
+              break;
+            case 'strong':
+              baseOffset = Math.min(100, length * 0.4);
+              break;
+          }
+
+          const finalOffset = baseOffset * (1 + strengthMultiplier);
+
+          this.controlX = midX + normalX * finalOffset;
+          this.controlY = midY + normalY * finalOffset;
+        }
+
+        // Update control point when nodes move or settings change
+        updateControlPoint() {
+          // Only auto-update if using preset styles, not manual positioning
+          if (!this.manualControlPoint) {
+            this.calculateControlPoint();
+          }
         }
       }
 
@@ -1095,6 +1169,7 @@
               // Drag link control point
               this.selectedLink.controlX = worldPos.x;
               this.selectedLink.controlY = worldPos.y;
+              this.selectedLink.manualControlPoint = true; // Mark as manually positioned
               this.draw();
             } else if (this.isResizingNode && this.selectedNode) {
               // Handle node resizing
@@ -1115,6 +1190,16 @@
               // Drag node
               this.selectedNode.x = worldPos.x - this.selectedNode.dragOffsetX;
               this.selectedNode.y = worldPos.y - this.selectedNode.dragOffsetY;
+
+              // Update connected links' control points if they're not manually positioned
+              this.links.forEach(link => {
+                if (
+                  (link.startNode === this.selectedNode || link.endNode === this.selectedNode) &&
+                  !link.manualControlPoint
+                ) {
+                  link.updateControlPoint();
+                }
+              });
 
               this.draw();
             } else if (this.isDragging) {
@@ -1333,6 +1418,10 @@
           const arrowOffEl = document.getElementById('arrowOff');
           const directionNormalEl = document.getElementById('directionNormal');
           const directionReverseEl = document.getElementById('directionReverse');
+          const curveStrengthEl = document.getElementById('curveStrength');
+          const curveStraightEl = document.getElementById('curveStraight');
+          const curveGentleEl = document.getElementById('curveGentle');
+          const curveStrongEl = document.getElementById('curveStrong');
 
           if (nodeFontSizeEl) {
             nodeFontSizeEl.addEventListener('input', e => {
@@ -1424,6 +1513,13 @@
             directionNormalEl.addEventListener('click', () => {
               if (this.selectedLink) {
                 this.selectedLink.isReversed = false;
+                console.log(
+                  'Link direction set to normal:',
+                  this.selectedLink.startNode.text,
+                  '→',
+                  this.selectedLink.endNode.text
+                );
+                this.selectedLink.updateControlPoint();
                 this.showLinkProperties(this.selectedLink);
                 this.draw();
               }
@@ -1434,6 +1530,63 @@
             directionReverseEl.addEventListener('click', () => {
               if (this.selectedLink) {
                 this.selectedLink.isReversed = true;
+                console.log(
+                  'Link direction set to reverse:',
+                  this.selectedLink.endNode.text,
+                  '→',
+                  this.selectedLink.startNode.text
+                );
+                this.selectedLink.updateControlPoint();
+                this.showLinkProperties(this.selectedLink);
+                this.draw();
+              }
+            });
+          }
+
+          if (curveStrengthEl) {
+            curveStrengthEl.addEventListener('input', e => {
+              if (this.selectedLink) {
+                this.selectedLink.curveStrength = parseInt(e.target.value);
+                const curveStrengthValue = document.getElementById('curveStrengthValue');
+                if (curveStrengthValue) {
+                  curveStrengthValue.textContent = e.target.value + '%';
+                }
+                this.selectedLink.updateControlPoint();
+                this.draw();
+              }
+            });
+          }
+
+          if (curveStraightEl) {
+            curveStraightEl.addEventListener('click', () => {
+              if (this.selectedLink) {
+                this.selectedLink.curveStyle = 'straight';
+                this.selectedLink.manualControlPoint = false;
+                this.selectedLink.updateControlPoint();
+                this.showLinkProperties(this.selectedLink);
+                this.draw();
+              }
+            });
+          }
+
+          if (curveGentleEl) {
+            curveGentleEl.addEventListener('click', () => {
+              if (this.selectedLink) {
+                this.selectedLink.curveStyle = 'gentle';
+                this.selectedLink.manualControlPoint = false;
+                this.selectedLink.updateControlPoint();
+                this.showLinkProperties(this.selectedLink);
+                this.draw();
+              }
+            });
+          }
+
+          if (curveStrongEl) {
+            curveStrongEl.addEventListener('click', () => {
+              if (this.selectedLink) {
+                this.selectedLink.curveStyle = 'strong';
+                this.selectedLink.manualControlPoint = false;
+                this.selectedLink.updateControlPoint();
                 this.showLinkProperties(this.selectedLink);
                 this.draw();
               }
@@ -1604,6 +1757,8 @@
               controlY: link.controlY,
               hasArrow: link.hasArrow,
               isReversed: link.isReversed,
+              curveStrength: link.curveStrength,
+              curveStyle: link.curveStyle,
             })),
           };
 
@@ -1670,6 +1825,8 @@
                   link.controlY = linkData.controlY || link.controlY;
                   link.hasArrow = linkData.hasArrow !== undefined ? linkData.hasArrow : true;
                   link.isReversed = linkData.isReversed || false;
+                  link.curveStrength = linkData.curveStrength || 30;
+                  link.curveStyle = linkData.curveStyle || 'gentle';
                   this.links.push(link);
                 }
               });
@@ -1937,7 +2094,10 @@
           }
 
           this.propertiesPanel.style.display = 'block';
-          this.propertiesTitle.textContent = 'Link Properties';
+          const linkInfo = link.isReversed
+            ? `Link Properties (${link.endNode.text} → ${link.startNode.text})`
+            : `Link Properties (${link.startNode.text} → ${link.endNode.text})`;
+          this.propertiesTitle.textContent = linkInfo;
           this.nodeProperties.style.display = 'none';
           this.linkProperties.style.display = 'block';
 
@@ -1946,6 +2106,11 @@
           const arrowOff = document.getElementById('arrowOff');
           const directionNormal = document.getElementById('directionNormal');
           const directionReverse = document.getElementById('directionReverse');
+          const curveStrengthInput = document.getElementById('curveStrength');
+          const curveStrengthValue = document.getElementById('curveStrengthValue');
+          const curveStraight = document.getElementById('curveStraight');
+          const curveGentle = document.getElementById('curveGentle');
+          const curveStrong = document.getElementById('curveStrong');
 
           if (arrowOn && arrowOff) {
             arrowOn.classList.toggle('active', link.hasArrow);
@@ -1955,6 +2120,18 @@
           if (directionNormal && directionReverse) {
             directionNormal.classList.toggle('active', !link.isReversed);
             directionReverse.classList.toggle('active', link.isReversed);
+          }
+
+          // Update curve controls
+          if (curveStrengthInput && curveStrengthValue) {
+            curveStrengthInput.value = link.curveStrength;
+            curveStrengthValue.textContent = link.curveStrength + '%';
+          }
+
+          if (curveStraight && curveGentle && curveStrong) {
+            curveStraight.classList.toggle('active', link.curveStyle === 'straight');
+            curveGentle.classList.toggle('active', link.curveStyle === 'gentle');
+            curveStrong.classList.toggle('active', link.curveStyle === 'strong');
           }
         }
 
@@ -1992,7 +2169,18 @@
         // Make canvasMap globally accessible for debugging
         window.canvasMap = canvasMap;
 
+        // Add debug functions
+        window.debugArrows = false;
+        window.toggleArrowDebug = () => {
+          window.debugArrows = !window.debugArrows;
+          console.log('Arrow debugging:', window.debugArrows ? 'enabled' : 'disabled');
+          if (window.debugArrows) {
+            console.log('Select a link and watch the console for arrow direction info');
+          }
+        };
+
         console.log('Page loaded. You can test the properties panel by running: testPropertiesPanel()');
+        console.log('Enable arrow debugging with: toggleArrowDebug()');
       });
     </script>
   </body>
