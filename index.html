@@ -398,6 +398,7 @@
         <div>Links: <span id="linkCount">0</span></div>
         <div>Use mouse wheel to zoom, drag to pan</div>
         <div>Click nodes to edit text, drag nodes to move</div>
+        <div>Press Delete/Backspace to delete selected items</div>
         <div id="linkModeInfo" style="display: none; color: #9c27b0; font-weight: bold">
           Link Mode: Click two nodes to connect them
         </div>
@@ -447,6 +448,14 @@
             <input type="range" class="property-range" id="nodeRadius" min="20" max="100" value="60" />
             <span id="radiusValue">60px</span>
           </div>
+
+          <div class="property-group">
+            <label class="property-label">Border</label>
+            <div class="property-buttons">
+              <button class="property-btn active" id="borderOn">Show</button>
+              <button class="property-btn" id="borderOff">Hide</button>
+            </div>
+          </div>
         </div>
 
         <!-- Link Properties -->
@@ -495,6 +504,7 @@
           this.fontSize = 14;
           this.shape = 'rectangle'; // 'rectangle' or 'circle'
           this.radius = 60; // Default radius for circle shape
+          this.hasBorder = true; // Whether to show border
         }
 
         // Check if a point is inside this node
@@ -577,15 +587,19 @@
 
           // Draw node background
           ctx.fillStyle = '#ffffff';
-          ctx.strokeStyle = this.isSelected ? '#4CAF50' : '#333333';
-          ctx.lineWidth = 2 / scale;
 
           if (this.shape === 'circle') {
             // Draw circle using custom radius
             ctx.beginPath();
             ctx.arc(this.x, this.y, this.radius, 0, Math.PI * 2);
             ctx.fill();
-            ctx.stroke();
+
+            // Draw border if enabled
+            if (this.hasBorder) {
+              ctx.strokeStyle = this.isSelected ? '#4CAF50' : '#333333';
+              ctx.lineWidth = 2 / scale;
+              ctx.stroke();
+            }
           } else {
             // Draw rounded rectangle
             const x = this.x - this.width / 2;
@@ -593,7 +607,13 @@
             ctx.beginPath();
             ctx.roundRect(x, y, this.width, this.height, 8);
             ctx.fill();
-            ctx.stroke();
+
+            // Draw border if enabled
+            if (this.hasBorder) {
+              ctx.strokeStyle = this.isSelected ? '#4CAF50' : '#333333';
+              ctx.lineWidth = 2 / scale;
+              ctx.stroke();
+            }
           }
 
           // Draw text
@@ -766,17 +786,19 @@
           ctx.restore();
         }
 
-        // Draw arrowhead at the end of the link
+        // Draw arrowhead at the middle of the link
         drawArrowhead(ctx, scale) {
           if (!this.hasArrow) return;
 
           const arrowSize = 8 / scale;
           const { start, end } = this.getEffectiveNodes();
 
-          // Get the direction at the end of the curve
-          const t = 0.95; // Slightly before the end to get good direction
-          const p1 = this.getBezierPoint(t, start, end);
-          const p2 = this.getBezierPoint(1, start, end);
+          // Get the direction at the middle of the curve (t = 0.5)
+          const t1 = 0.45; // Slightly before middle to get good direction
+          const t2 = 0.55; // Slightly after middle
+          const p1 = this.getBezierPoint(t1, start, end);
+          const p2 = this.getBezierPoint(t2, start, end);
+          const pMiddle = this.getBezierPoint(0.5, start, end); // Exact middle position
 
           const dx = p2.x - p1.x;
           const dy = p2.y - p1.y;
@@ -786,15 +808,15 @@
             const unitX = dx / length;
             const unitY = dy / length;
 
-            // Calculate arrowhead points
-            const arrowX1 = p2.x - arrowSize * unitX - arrowSize * 0.5 * unitY;
-            const arrowY1 = p2.y - arrowSize * unitY + arrowSize * 0.5 * unitX;
-            const arrowX2 = p2.x - arrowSize * unitX + arrowSize * 0.5 * unitY;
-            const arrowY2 = p2.y - arrowSize * unitY - arrowSize * 0.5 * unitX;
+            // Calculate arrowhead points at the middle
+            const arrowX1 = pMiddle.x - arrowSize * unitX - arrowSize * 0.5 * unitY;
+            const arrowY1 = pMiddle.y - arrowSize * unitY + arrowSize * 0.5 * unitX;
+            const arrowX2 = pMiddle.x - arrowSize * unitX + arrowSize * 0.5 * unitY;
+            const arrowY2 = pMiddle.y - arrowSize * unitY - arrowSize * 0.5 * unitX;
 
             ctx.fillStyle = this.isSelected ? '#9C27B0' : '#666666';
             ctx.beginPath();
-            ctx.moveTo(p2.x, p2.y);
+            ctx.moveTo(pMiddle.x, pMiddle.y);
             ctx.lineTo(arrowX1, arrowY1);
             ctx.lineTo(arrowX2, arrowY2);
             ctx.closePath();
@@ -1295,11 +1317,18 @@
             }
           });
 
+          // Add keyboard event listener for deletion
+          document.addEventListener('keydown', e => {
+            this.handleKeyDown(e);
+          });
+
           // Properties panel events - with error checking
           const nodeFontSizeEl = document.getElementById('nodeFontSize');
           const shapeRectEl = document.getElementById('shapeRect');
           const shapeCircleEl = document.getElementById('shapeCircle');
           const nodeRadiusEl = document.getElementById('nodeRadius');
+          const borderOnEl = document.getElementById('borderOn');
+          const borderOffEl = document.getElementById('borderOff');
           const arrowOnEl = document.getElementById('arrowOn');
           const arrowOffEl = document.getElementById('arrowOff');
           const directionNormalEl = document.getElementById('directionNormal');
@@ -1345,6 +1374,26 @@
             shapeCircleEl.addEventListener('click', () => {
               if (this.selectedNode) {
                 this.selectedNode.shape = 'circle';
+                this.showNodeProperties(this.selectedNode);
+                this.draw();
+              }
+            });
+          }
+
+          if (borderOnEl) {
+            borderOnEl.addEventListener('click', () => {
+              if (this.selectedNode) {
+                this.selectedNode.hasBorder = true;
+                this.showNodeProperties(this.selectedNode);
+                this.draw();
+              }
+            });
+          }
+
+          if (borderOffEl) {
+            borderOffEl.addEventListener('click', () => {
+              if (this.selectedNode) {
+                this.selectedNode.hasBorder = false;
                 this.showNodeProperties(this.selectedNode);
                 this.draw();
               }
@@ -1545,6 +1594,7 @@
               fontSize: node.fontSize,
               shape: node.shape,
               radius: node.radius,
+              hasBorder: node.hasBorder,
             })),
             links: this.links.map(link => ({
               id: link.id,
@@ -1602,6 +1652,7 @@
               node.fontSize = nodeData.fontSize || 14;
               node.shape = nodeData.shape || 'rectangle';
               node.radius = nodeData.radius || 60;
+              node.hasBorder = nodeData.hasBorder !== undefined ? nodeData.hasBorder : true;
               this.nodes.push(node);
               nodeMap.set(node.id, node);
             });
@@ -1688,13 +1739,63 @@
           return link;
         }
 
+        // Remove a node and all its connected links
+        removeNode(node) {
+          // Remove all links connected to this node
+          this.links = this.links.filter(link => link.startNode !== node && link.endNode !== node);
+
+          // Remove the node
+          const index = this.nodes.indexOf(node);
+          if (index !== -1) {
+            this.nodes.splice(index, 1);
+          }
+
+          // Clear selection
+          this.selectedNode = null;
+          this.hideProperties();
+
+          // Update counts and redraw
+          this.updateNodeCount();
+          this.updateLinkCount();
+          this.draw();
+        }
+
         // Remove a link
         removeLink(link) {
           const index = this.links.indexOf(link);
           if (index !== -1) {
             this.links.splice(index, 1);
+
+            // Clear selection
+            this.selectedLink = null;
+            this.hideProperties();
+
+            // Update count and redraw
             this.updateLinkCount();
             this.draw();
+          }
+        }
+
+        // Handle keyboard input for deletion
+        handleKeyDown(e) {
+          // Don't delete if we're editing text
+          if (this.editingNode) {
+            return;
+          }
+
+          // Check for Delete or Backspace key
+          if (e.key === 'Delete' || e.key === 'Backspace') {
+            e.preventDefault(); // Prevent browser navigation on backspace
+
+            if (this.selectedNode) {
+              // Delete selected node
+              console.log('Deleting node:', this.selectedNode.text);
+              this.removeNode(this.selectedNode);
+            } else if (this.selectedLink) {
+              // Delete selected link
+              console.log('Deleting link:', this.selectedLink.id);
+              this.removeLink(this.selectedLink);
+            }
           }
         }
 
@@ -1790,6 +1891,8 @@
           const radiusGroup = document.getElementById('radiusGroup');
           const radiusInput = document.getElementById('nodeRadius');
           const radiusValue = document.getElementById('radiusValue');
+          const borderOn = document.getElementById('borderOn');
+          const borderOff = document.getElementById('borderOff');
 
           if (fontSizeInput && fontSizeValue) {
             fontSizeInput.value = node.fontSize;
@@ -1811,6 +1914,12 @@
           if (radiusInput && radiusValue && node.shape === 'circle') {
             radiusInput.value = node.radius;
             radiusValue.textContent = node.radius + 'px';
+          }
+
+          // Update border buttons
+          if (borderOn && borderOff) {
+            borderOn.classList.toggle('active', node.hasBorder);
+            borderOff.classList.toggle('active', !node.hasBorder);
           }
         }
 
